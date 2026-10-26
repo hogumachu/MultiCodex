@@ -2,6 +2,14 @@
 
 Codex 데스크톱 앱의 여러 계정을 나란히 실행하는 macOS 메뉴바 앱입니다. 로그인·설정·대화를 계정별로 보관하며, 다른 계정으로 이동해도 열어 둔 작업은 계속됩니다.
 
+## 설치
+
+[GitHub Releases](https://github.com/hogumachu/MultiCodex/releases)에서 **MultiCodex-0.2.1-macOS.zip**을 내려받아 압축을 풀고 **MultiCodex.app**을 응용 프로그램 폴더로 옮겨 실행합니다. macOS 15 이상과 호환되는 Codex 데스크톱 앱이 필요하며, Xcode는 필요하지 않습니다.
+
+현재 전달용 빌드는 Developer ID 서명과 Apple 공증을 받지 않은 테스트 배포본입니다. 첫 실행이 차단되면 출처를 신뢰하는 경우에만 **시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기**로 이 앱의 실행을 허용할 수 있습니다. [Apple 안내](https://support.apple.com/ko-kr/102445)를 참고하세요.
+
+각 사용자는 자신의 Mac에서 직접 로그인합니다. 배포 파일에는 개발자의 로그인 정보·계정 목록·대화가 포함되지 않습니다.
+
 ## 사용
 
 1. **계정 추가**에서 이름을 입력하고 **계정 열기**를 누릅니다.
@@ -50,3 +58,16 @@ Swift 코드는 Xcode에 포함된 `swift-format` 기본 규칙(2칸 들여쓰�
 xcrun swift-format format --in-place --recursive Sources Tests
 xcrun swift-format lint --strict --recursive Sources Tests
 ```
+
+## 앱 아이콘
+
+아이콘 원본은 [icon-1024.png](Sources/MultiCodex/Assets.xcassets/AppIcon.appiconset/icon-1024.png)이며, 같은 폴더에 macOS 표시 크기별 이미지가 있습니다. Codex의 내장 이미지 생성 도구로 제작했습니다.
+
+<details>
+<summary>아이콘 생성 프롬프트</summary>
+
+Use case: logo-brand.
+Asset type: production macOS application icon for MultiCodex, an app that keeps multiple coding accounts in separate windows.
+Create one polished, memorable app icon, square 1024 by 1024 pixels. A centered deep midnight-blue rounded-square tile with generous macOS-style rounded corners, occupying about 88 percent of the canvas, with a completely transparent exterior. The symbol is two overlapping upright application-window cards, slightly offset diagonally, representing two independent accounts. The back card is saturated cobalt blue, the front card is luminous pale blue/near-white with a dark navy interior and one bold, simple terminal chevron and short underscore. Keep the geometry extremely clean and the symbol large, legible at 32 pixels. Subtle soft three-dimensional depth, precise edges, restrained soft highlights, premium native Mac utility aesthetic. Balanced centered composition, front-on orthographic view. Color palette drawn from an existing dark UI with blue accents. No app name, letters, words, tiny interface details, people, avatar circles, official OpenAI logo, watermarks, background scene, mockup device, extra symbols, or multiple variants. Deliver only the finished icon artwork with real alpha transparency around the rounded tile.
+
+</details>
