@@ -4,9 +4,9 @@ Codex 데스크톱 앱의 여러 계정을 나란히 실행하는 macOS 메뉴�
 
 ## 설치
 
-[GitHub Releases](https://github.com/hogumachu/MultiCodex/releases)에서 **MultiCodex-0.2.2-macOS.zip**을 내려받아 압축을 풀고 **MultiCodex.app**을 응용 프로그램 폴더로 옮겨 실행합니다. macOS 15 이상과 호환되는 Codex 데스크톱 앱이 필요하며, Xcode는 필요하지 않습니다.
+[GitHub Releases](https://github.com/hogumachu/MultiCodex/releases)에서 **MultiCodex-0.2.3-macOS.zip**을 내려받아 압축을 풀고 **MultiCodex.app**을 응용 프로그램 폴더로 옮겨 실행합니다. macOS 15 이상과 호환되는 Codex 데스크톱 앱이 필요하며, Xcode는 필요하지 않습니다.
 
-현재 전달용 빌드는 Developer ID 서명과 Apple 공증을 받지 않은 테스트 배포본입니다. 첫 실행이 차단되면 출처를 신뢰하는 경우에만 **시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기**로 이 앱의 실행을 허용할 수 있습니다. [Apple 안내](https://support.apple.com/ko-kr/102445)를 참고하세요.
+v0.2.3 배포본은 **Developer ID 서명과 Apple 공증**을 완료했으며, Apple Silicon과 Intel Mac을 지원합니다. 공증 티켓이 앱에 포함되어 있습니다. 첫 실행 시 인터넷에서 내려받은 앱을 열지 묻는 일반 확인 창은 표시될 수 있습니다. [Apple 안내](https://support.apple.com/ko-kr/102445)를 참고하세요.
 
 각 사용자는 자신의 Mac에서 직접 로그인합니다. 배포 파일에는 개발자의 로그인 정보·계정 목록·대화가 포함되지 않습니다.
 
@@ -51,6 +51,8 @@ xcodebuild -project MultiCodex.xcodeproj -scheme MultiCodex -destination 'platfo
 ```
 
 릴리스 앱은 `build/Build/Products/Release/MultiCodex.app`에 생성됩니다. 개발 시 `--data-dir <경로>` 실행 인자로 별도 계정 목록을 사용할 수 있습니다.
+
+로컬 빌드는 임시 서명을 사용합니다. 외부 배포 시에는 Release 아카이브를 Developer ID 인증서로 서명하고 Apple 공증을 받은 뒤, 공증 티켓을 포함한 앱을 ZIP으로 배포합니다. Release 구성에는 Hardened Runtime이 활성화되어 있습니다.
 
 프로젝트 설정은 Xcode 프로젝트에서 관리합니다. [BrianUI](https://github.com/thebriancompany/swift-brian-ui)의 `main` 브랜치를 사용하며, 해석된 버전은 `Package.resolved`에 고정합니다. 테스트는 Swift Testing과 CustomDump를 사용합니다.
 
