@@ -178,7 +178,7 @@ final class AppController {
           selection: selection)
       }.value
       message =
-        "\(target.name)에 대화 \(result.conversations)개를 가져왔습니다. 원본 파일 없음으로 \(result.skippedConversations)개 제외."
+        "\(target.name)에 대화 \(result.conversations)개를 가져오거나 복구했습니다. 원본 또는 이전 기록 없음으로 \(result.skippedConversations)개 제외."
       return result
     } catch {
       message = error.localizedDescription

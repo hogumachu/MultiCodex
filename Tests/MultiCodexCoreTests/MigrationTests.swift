@@ -63,6 +63,64 @@ private struct MigrationFixture {
 }
 
 @Suite struct MigrationTests {
+  @Test(arguments: [false, true])
+  func importsReadOnlyWALWithoutSidecarsOrLosingCommittedTransactions(pendingWAL: Bool) throws {
+    let f = MigrationFixture()
+    defer { f.clean() }
+    let writerProfile = pendingWAL ? f.profile("writer") : f.source
+    let writer = try f.state(writerProfile)
+    try writer.execute("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0")
+    try writer.execute("INSERT INTO projects VALUES('committed','Committed project')")
+    if pendingWAL {
+      try f.write(f.source, "auth.json", "AUTH-source")
+      for suffix in ["", "-wal"] {
+        try FileManager.default.copyItem(
+          atPath: writerProfile.codexHome + "/state_5.sqlite" + suffix,
+          toPath: f.source.codexHome + "/state_5.sqlite" + suffix)
+      }
+    } else {
+      try writer.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    }
+    writer.close()
+    if !pendingWAL {
+      // Apple's SQLite may persist empty sidecars after close; model a clean,
+      // checkpointed WAL database whose sidecars are absent explicitly.
+      for suffix in ["-wal", "-shm"] {
+        let path = f.source.codexHome + "/state_5.sqlite" + suffix
+        if FileManager.default.fileExists(atPath: path) {
+          try FileManager.default.removeItem(atPath: path)
+        }
+      }
+    }
+    let database = URL(fileURLWithPath: f.source.codexHome + "/state_5.sqlite")
+    let original = try Data(contentsOf: database)
+    let wal = URL(fileURLWithPath: database.path + "-wal")
+    let originalWAL = pendingWAL ? try Data(contentsOf: wal) : nil
+    let fm = FileManager.default
+    #expect(!fm.fileExists(atPath: database.path + "-shm"), "Fixture must start without SHM")
+    try fm.setAttributes([.posixPermissions: 0o500], ofItemAtPath: f.source.codexHome)
+    defer { try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: f.source.codexHome) }
+    var selection = MigrationSelection()
+    selection.shortcuts = false
+    selection.conversations = false
+    for target in [f.target, f.profile("third")] {
+      let result = try ProfileMigration(
+        source: f.source, target: target, backupRoot: f.root.appendingPathComponent("backups")
+      ).run(selection: selection)
+      expectNoDifference(result.projects, 1)
+      let imported = try MigrationDatabase(
+        URL(fileURLWithPath: target.codexHome + "/state_5.sqlite"))
+      expectNoDifference(try imported.rows("SELECT name FROM projects"), [["Committed project"]])
+      imported.close()
+    }
+    expectNoDifference(try Data(contentsOf: database), original)
+    if let originalWAL { expectNoDifference(try Data(contentsOf: wal), originalWAL) }
+    #expect(
+      !fm.fileExists(atPath: database.path + "-shm"),
+      "Import must not create SHM (pending WAL: \(pendingWAL))")
+    if !pendingWAL { #expect(!fm.fileExists(atPath: wal.path)) }
+  }
+
   @Test(arguments: ["DELETE", "WAL"])
   func importsSameSourceIntoTwoAccountsInSequence(journalMode: String) throws {
     let f = MigrationFixture()
@@ -505,6 +563,121 @@ private struct MigrationFixture {
       URL(fileURLWithPath: f.source.codexHome + "/state_5.sqlite"), readOnly: true)
     #expect(try original.rows("SELECT id FROM threads WHERE id='missing'") == [["missing"]])
     original.close()
+  }
+}
+
+@Suite struct LineageMigrationTests {
+  @Test(arguments: [false, true])
+  func copiesEverySegmentWithTheSameChatIDAcrossThreeAccounts(indexed: Bool) throws {
+    let f = MigrationFixture()
+    defer { f.clean() }
+    let basePath = "archived_sessions/rollout-private-A.jsonl.zst"
+    let baseBytes = try f.compressed(f.source, basePath)
+    let middlePath = "sessions/rollout-private-A_middle.jsonl"
+    let headPath = "sessions/rollout-private-A_head.jsonl"
+    let middle =
+      #"{"type":"session_meta","payload":{"id":"private-A","history_mode":"paginated","history_base":{"thread_id":"private-A","end_ordinal_exclusive":2,"end_byte_offset":100}}}"#
+      + "\n"
+    let head =
+      #"{"type":"session_meta","payload":{"id":"private-A","history_mode":"paginated","history_base":{"thread_id":"middle","end_ordinal_exclusive":3,"end_byte_offset":200}}}"#
+      + "\n"
+    try f.write(f.source, middlePath, middle)
+    try f.write(f.source, headPath, head)
+    if indexed {
+      let db = try f.state(f.source)
+      try db.execute(
+        "INSERT INTO threads VALUES('private-A','\(f.source.codexHome)/\(headPath)',NULL,NULL,NULL,NULL,'Chat','paginated')"
+      )
+      db.close()
+      try f.history(f.source).close()
+    }
+    for (source, target) in [(f.source, f.target), (f.target, f.profile("third"))] {
+      let migration = ProfileMigration(
+        source: source, target: target, backupRoot: f.root.appendingPathComponent("backups"))
+      let result = try migration.run(selection: .init())
+      expectNoDifference(result.conversations, 1)
+      expectNoDifference(result.skippedConversations, 0)
+      expectNoDifference(try f.read(target, headPath), head)
+      expectNoDifference(try f.read(target, middlePath), middle)
+      expectNoDifference(
+        try Data(contentsOf: URL(fileURLWithPath: target.codexHome + "/" + basePath)), baseBytes)
+      expectNoDifference(try migration.run(selection: .init()).conversations, 0)
+    }
+    expectNoDifference(try f.read(f.source, headPath), head)
+  }
+
+  @Test(arguments: [false, true])
+  func excludesChatsWhoseHistoryBaseIsMissing(indexed: Bool) throws {
+    let f = MigrationFixture()
+    defer { f.clean() }
+    try f.write(
+      f.source, "sessions/head.jsonl",
+      #"{"type":"session_meta","payload":{"id":"a","history_base":{"thread_id":"missing"}}}"# + "\n"
+    )
+    if indexed {
+      let db = try f.state(f.source)
+      try db.execute(
+        "INSERT INTO threads VALUES('a','\(f.source.codexHome)/sessions/head.jsonl',NULL,NULL,NULL,NULL,'Chat','paginated')"
+      )
+      db.close()
+    }
+    let result = try f.migrate()
+    expectNoDifference(result.conversations, 0)
+    expectNoDifference(result.skippedConversations, 1)
+    #expect(!FileManager.default.fileExists(atPath: f.target.codexHome + "/sessions/head.jsonl"))
+    if indexed {
+      let db = try MigrationDatabase(URL(fileURLWithPath: f.target.codexHome + "/state_5.sqlite"))
+      defer { db.close() }
+      expectNoDifference(try db.rows("SELECT id FROM threads"), [])
+    }
+  }
+
+  @Test(arguments: [false, true])
+  func retriesRepairMissingSegmentsButPreserveChatsContinuedInTarget(divergent: Bool) throws {
+    let f = MigrationFixture()
+    defer { f.clean() }
+    let head =
+      #"{"type":"session_meta","payload":{"id":"a","history_base":{"thread_id":"base"}}}"# + "\n"
+    let base = #"{"type":"session_meta","payload":{"id":"a"}}"# + "\n"
+    try f.write(f.source, "sessions/base.jsonl", base)
+    try f.write(f.source, "sessions/head.jsonl", head)
+    try f.write(f.target, "sessions/head.jsonl", head + (divergent ? "{}\n" : ""))
+    for profile in [f.source, f.target] {
+      let db = try f.state(profile)
+      try db.execute(
+        "INSERT INTO threads VALUES('a','\(profile.codexHome)/sessions/head.jsonl',NULL,NULL,NULL,NULL,'Keep title','legacy')"
+      )
+      db.close()
+    }
+    let result = try f.migrate()
+    expectNoDifference(result.conversations, divergent ? 0 : 1)
+    expectNoDifference(
+      try f.read(f.target, "sessions/head.jsonl"), head + (divergent ? "{}\n" : ""))
+    if divergent {
+      #expect(!FileManager.default.fileExists(atPath: f.target.codexHome + "/sessions/base.jsonl"))
+    } else {
+      expectNoDifference(try f.read(f.target, "sessions/base.jsonl"), base)
+      try ProfileMigration(
+        source: f.source, target: f.target, backupRoot: f.root.appendingPathComponent("backups")
+      ).restoreBackup(result.backup)
+      #expect(!FileManager.default.fileExists(atPath: f.target.codexHome + "/sessions/base.jsonl"))
+      expectNoDifference(try f.read(f.target, "sessions/head.jsonl"), head)
+    }
+  }
+
+  @Test func rejectsCircularLineageBeforeChangingTarget() throws {
+    let f = MigrationFixture()
+    defer { f.clean() }
+    try f.write(
+      f.source, "sessions/base.jsonl",
+      #"{"type":"session_meta","payload":{"id":"a","history_base":{"thread_id":"head"}}}"# + "\n")
+    try f.write(
+      f.source, "sessions/head.jsonl",
+      #"{"type":"session_meta","payload":{"id":"a","history_base":{"thread_id":"base"}}}"# + "\n")
+    try f.write(f.target, "keybindings.json", "[]")
+    #expect(throws: MigrationError.self) { try f.migrate() }
+    expectNoDifference(try f.read(f.target, "keybindings.json"), "[]")
+    #expect(!FileManager.default.fileExists(atPath: f.target.codexHome + "/sessions"))
   }
 }
 

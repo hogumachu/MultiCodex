@@ -504,12 +504,12 @@ private struct MigrationView: View {
         }
       } else if let result {
         BrianCallout(
-          "프로젝트 \(result.projects)개 · 대화 \(result.conversations)개를 새로 등록했습니다. 기존 대화는 유지됩니다.",
+          "프로젝트 \(result.projects)개 · 대화 \(result.conversations)개를 가져오거나 누락된 기록을 복구했습니다. 기존 대화는 유지됩니다.",
           title: "가져오기를 완료했습니다", systemImage: "checkmark.circle"
         ).calloutTone(.positive)
         if result.skippedConversations > 0 {
           BrianCallout(
-            "원본 파일이 없는 대화 \(result.skippedConversations)개는 제외했습니다. 파일이 있는 대화만 가져왔으며 원본 계정은 변경하지 않았습니다.",
+            "대화 원본이나 이전 기록 파일이 없는 대화 \(result.skippedConversations)개는 제외했습니다. 필요한 기록이 모두 있는 대화만 가져왔으며 원본 계정은 변경하지 않았습니다.",
             title: "일부 대화 제외", systemImage: "exclamationmark.triangle"
           ).calloutTone(.warning)
         }

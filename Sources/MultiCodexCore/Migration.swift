@@ -32,6 +32,8 @@ public final class ProfileMigration {
   private let target: Profile
   private let backupRoot: URL
   private var changes: [Change] = []
+  private var rolloutFiles: [URL]?
+  private var inspectedRollouts: [String: ConversationRollout] = [:]
   private struct Change: Codable {
     let destination: String
     let original: String?
@@ -48,6 +50,8 @@ public final class ProfileMigration {
       canonicalPath(source.codexHome) != canonicalPath(target.codexHome)
     else { throw MigrationError.invalid("서로 다른 계정과 가져올 항목을 선택해 주세요.") }
     changes = []
+    rolloutFiles = nil
+    inspectedRollouts = [:]
     if fm.fileExists(atPath: backupRoot.path) {
       try safe(backupRoot)
       for folder in try fm.contentsOfDirectory(at: backupRoot, includingPropertiesForKeys: nil) {
@@ -102,7 +106,6 @@ public final class ProfileMigration {
         if fm.fileExists(atPath: sourceDB.path) {
           let output = stage.appendingPathComponent("state_5.sqlite")
           let db = try prepareDatabase(source: sourceDB, target: targetDB, output: output)
-          try db.execute("ATTACH DATABASE \(literal(sourceDB.path)) AS incoming")
           if selection.projects {
             projectCount = try db.merge("projects")
             _ = try db.merge(
@@ -110,6 +113,7 @@ public final class ProfileMigration {
           }
           if selection.conversations {
             var rollouts: [String: ConversationRollout] = [:]
+            var lineages: [String: [ConversationRollout]] = [:]
             try db.execute("CREATE TEMP TABLE eligible_threads (id TEXT PRIMARY KEY)")
             for row in try db.rows(
               "SELECT id, rollout_path FROM incoming.threads WHERE id NOT IN (SELECT id FROM main.threads)"
@@ -124,7 +128,12 @@ public final class ProfileMigration {
                 continue
               }
               _ = try rolloutRelative(rollout.file)
+              guard let lineage = try rolloutLineage(rollout) else {
+                skippedIDs.insert(id)
+                continue
+              }
               rollouts[id] = rollout
+              lineages[id] = lineage
               try db.execute("INSERT INTO eligible_threads VALUES (\(literal(id)))")
               newThreadIDs.insert(id)
             }
@@ -156,27 +165,36 @@ public final class ProfileMigration {
               guard let id = row[0], let rollout = rollouts[id] else {
                 throw MigrationError.invalid("가져올 채팅 기록을 확인할 수 없습니다.")
               }
-              let to = try prepareRollout(rollout, prepared: &prepared)
+              for segment in lineages[id] ?? [] {
+                _ = try prepareRollout(segment, prepared: &prepared)
+              }
+              let to = logicalDestination(rollout, relative: try rolloutRelative(rollout.file))
               try db.execute(
                 "UPDATE threads SET rollout_path = \(literal(to.path)) WHERE id = \(literal(id))")
             }
+            let repairedIDs = try repairMissingRollouts(db: db, prepared: &prepared)
+            newThreadIDs.formUnion(repairedIDs)
+            threadCount += repairedIDs.count
             let knownIDs = Set(try db.rows("SELECT id FROM threads").compactMap { $0[0] })
             let legacyIDs = try addUnindexedRollouts(
-              prepared: &prepared, excluding: knownIDs.union(skippedIDs))
+              prepared: &prepared, excluding: knownIDs.union(skippedIDs), skippedIDs: &skippedIDs)
             newThreadIDs.formUnion(legacyIDs)
             threadCount += legacyIDs.count
             let columns = try db.rows("PRAGMA table_info(threads)").compactMap { $0[1] }
             if columns.contains("history_mode") {
-              requiresHistory = try !db.rows(
-                "SELECT id FROM threads WHERE id IN (SELECT id FROM imported_threads) AND history_mode = 'paginated'"
-              ).isEmpty
+              requiresHistory = try newThreadIDs.contains { id in
+                try !db.rows(
+                  "SELECT id FROM threads WHERE id = \(literal(id)) AND history_mode = 'paginated'"
+                ).isEmpty
+              }
             }
           }
           try db.check()
           db.close()
           prepared.append((output, targetDB))
         } else if selection.conversations {
-          newThreadIDs = try addUnindexedRollouts(prepared: &prepared, excluding: [])
+          newThreadIDs = try addUnindexedRollouts(
+            prepared: &prepared, excluding: [], skippedIDs: &skippedIDs)
           threadCount = newThreadIDs.count
         }
         if selection.conversations {
@@ -185,7 +203,6 @@ public final class ProfileMigration {
             let to = try database(target, name: "thread_history_1.sqlite")
             let output = stage.appendingPathComponent("thread_history_1.sqlite")
             let db = try prepareDatabase(source: from, target: to, output: output)
-            try db.execute("ATTACH DATABASE \(literal(from.path)) AS incoming")
             try db.execute("CREATE TEMP TABLE imported_thread_ids (id TEXT PRIMARY KEY)")
             for id in newThreadIDs {
               try db.execute("INSERT INTO imported_thread_ids VALUES (\(literal(id)))")
@@ -338,7 +355,14 @@ public final class ProfileMigration {
     guard canonicalPath(source.path) != canonicalPath(target.path) else {
       throw MigrationError.invalid("원본과 대상이 같은 데이터베이스를 사용하고 있습니다.")
     }
-    let src = try MigrationDatabase(source, readOnly: true)
+    // Attach a private SQLite snapshot, never the original account database. This also
+    // keeps all reads in this import on the same committed WAL snapshot.
+    let incoming = output.deletingLastPathComponent().appendingPathComponent(
+      "incoming-" + output.lastPathComponent)
+    let original = try MigrationDatabase(source, readOnly: true)
+    defer { original.close() }
+    try original.snapshot(to: incoming)
+    let src = try MigrationDatabase(incoming, readOnly: true)
     defer { src.close() }
     let db: MigrationDatabase
     if fm.fileExists(atPath: target.path) {
@@ -361,10 +385,11 @@ public final class ProfileMigration {
       ) {
         if let sql = row[0] { try db.execute(sql) }
       }
-      try db.execute("ATTACH DATABASE \(literal(source.path)) AS schema_source")
+      try db.execute("ATTACH DATABASE \(literal(incoming.path)) AS schema_source")
       try db.execute("INSERT INTO _sqlx_migrations SELECT * FROM schema_source._sqlx_migrations")
       try db.execute("DETACH DATABASE schema_source")
     }
+    try db.execute("ATTACH DATABASE \(literal(incoming.path)) AS incoming")
     return db
   }
 
@@ -408,10 +433,9 @@ public final class ProfileMigration {
     return home(profile, name)
   }
 
-  private func addUnindexedRollouts(prepared: inout [(URL, URL)], excluding knownIDs: Set<String>)
-    throws -> Set<String>
-  {
-    var imported = Set<String>()
+  private func sourceRolloutFiles() throws -> [URL] {
+    if let rolloutFiles { return rolloutFiles }
+    var files: [URL] = []
     var visited = Set<String>()
     for folder in ["sessions", "archived_sessions"] {
       let root = home(source, folder)
@@ -431,17 +455,102 @@ public final class ProfileMigration {
         guard url.pathExtension == "jsonl" || url.lastPathComponent.hasSuffix(".jsonl.zst"),
           try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true
         else { continue }
-        let logicalPath = url.pathExtension == "zst" ? String(url.path.dropLast(4)) : url.path
-        guard visited.insert(logicalPath).inserted else { continue }
-        guard let rollout = try ConversationRollout.read(path: logicalPath) else { continue }
-        guard !knownIDs.contains(rollout.id), !imported.contains(rollout.id) else { continue }
-        let previousCount = prepared.count
-        _ = try prepareRollout(rollout, prepared: &prepared)
-        if prepared.count > previousCount { imported.insert(rollout.id) }
+        let logical = url.pathExtension == "zst" ? url.deletingPathExtension() : url
+        if visited.insert(logical.path).inserted { files.append(logical) }
       }
       if let enumerationError { throw enumerationError }
     }
+    rolloutFiles = files.sorted { $0.path < $1.path }
+    return rolloutFiles ?? []
+  }
+
+  /// history_base identifies a physical rollout by its filename, not session_meta.id.
+  /// A resumed head and its previous segments can all have the same logical chat ID.
+  private func rolloutLineage(_ rollout: ConversationRollout, visiting: Set<String> = []) throws
+    -> [ConversationRollout]?
+  {
+    guard !visiting.contains(rollout.file.path) else {
+      throw MigrationError.invalid("채팅의 이전 기록이 순환 참조합니다: \(rollout.file.lastPathComponent)")
+    }
+    guard let baseID = rollout.historyBaseID else { return [rollout] }
+    let candidates = try sourceRolloutFiles().filter {
+      let stem = $0.deletingPathExtension().lastPathComponent
+      return stem == baseID || stem.hasSuffix("-" + baseID) || stem.hasSuffix("_" + baseID)
+    }
+    guard !candidates.isEmpty else { return nil }
+    guard candidates.count == 1, let file = candidates.first else {
+      throw MigrationError.invalid("채팅의 이전 기록 파일이 여러 개입니다: \(baseID)")
+    }
+    let base: ConversationRollout
+    if let cached = inspectedRollouts[file.path] {
+      base = cached
+    } else {
+      guard let value = try ConversationRollout.read(path: file.path) else { return nil }
+      inspectedRollouts[file.path] = value
+      base = value
+    }
+    guard let lineage = try rolloutLineage(base, visiting: visiting.union([rollout.file.path]))
+    else { return nil }
+    return lineage + [rollout]
+  }
+
+  private func addUnindexedRollouts(
+    prepared: inout [(URL, URL)], excluding knownIDs: Set<String>, skippedIDs: inout Set<String>
+  )
+    throws -> Set<String>
+  {
+    var imported = Set<String>()
+    var unindexed: [String: [ConversationRollout]] = [:]
+    for url in try sourceRolloutFiles() {
+      guard let rollout = try ConversationRollout.read(path: url.path),
+        !knownIDs.contains(rollout.id)
+      else { continue }
+      unindexed[rollout.id, default: []].append(rollout)
+    }
+    for (id, rollouts) in unindexed {
+      var segments: [ConversationRollout] = []
+      for rollout in rollouts {
+        guard let lineage = try rolloutLineage(rollout) else {
+          skippedIDs.insert(id)
+          break
+        }
+        segments += lineage
+      }
+      guard !skippedIDs.contains(id) else { continue }
+      let previousCount = prepared.count
+      for segment in segments { _ = try prepareRollout(segment, prepared: &prepared) }
+      if prepared.count > previousCount { imported.insert(id) }
+    }
     return imported
+  }
+
+  /// Older imports may have copied only the head. Retry fills missing segments only
+  /// when the target still has the same head; a chat continued in the target is kept.
+  private func repairMissingRollouts(db: MigrationDatabase, prepared: inout [(URL, URL)]) throws
+    -> Set<String>
+  {
+    var repaired = Set<String>()
+    for row in try db.rows(
+      "SELECT incoming.threads.id, incoming.threads.rollout_path, main.threads.rollout_path FROM incoming.threads JOIN main.threads USING (id) WHERE id NOT IN (SELECT id FROM imported_threads)"
+    ) {
+      guard let id = row[0], let path = row[1], let targetPath = row[2],
+        let rollout = try ConversationRollout.read(path: path, expectedID: id)
+      else { continue }
+      let destination = logicalDestination(rollout, relative: try rolloutRelative(rollout.file))
+      guard targetPath == destination.path || targetPath == destination.path + ".zst" else {
+        continue
+      }
+      if let existing = try ConversationRollout.read(path: targetPath, expectedID: id),
+        existing.contentHash != rollout.contentHash
+      {
+        continue
+      }
+      guard let lineage = try rolloutLineage(rollout) else { continue }
+      let previousCount = prepared.count
+      for segment in lineage { _ = try prepareRollout(segment, prepared: &prepared) }
+      if prepared.count > previousCount { repaired.insert(id) }
+    }
+    return repaired
   }
 
   /// Preserve compressed storage while keeping the logical .jsonl path expected by Codex.
@@ -449,8 +558,12 @@ public final class ProfileMigration {
     -> URL
   {
     let relative = try rolloutRelative(rollout.file)
-    let logical = home(
-      target, rollout.file.pathExtension == "zst" ? String(relative.dropLast(4)) : relative)
+    let logical = logicalDestination(rollout, relative: relative)
+    if prepared.contains(where: {
+      $0.1 == logical || $0.1 == logical.appendingPathExtension("zst")
+    }) {
+      return logical
+    }
     if let existing = try ConversationRollout.read(path: logical.path, expectedID: rollout.id) {
       guard existing.contentHash == rollout.contentHash else {
         throw MigrationError.invalid("같은 경로에 다른 대화 파일이 있습니다. 가져오기를 중단했습니다.")
@@ -461,6 +574,10 @@ public final class ProfileMigration {
       prepared.append((rollout.file, destination))
     }
     return logical
+  }
+
+  private func logicalDestination(_ rollout: ConversationRollout, relative: String) -> URL {
+    home(target, rollout.file.pathExtension == "zst" ? String(relative.dropLast(4)) : relative)
   }
 
   private func rolloutRelative(_ url: URL) throws -> String {
@@ -580,7 +697,11 @@ private func identifier(_ value: String) -> String {
 final class MigrationDatabase {
   private var handle: OpaquePointer?
   private let databaseName: String
+  private let url: URL
+  private let readOnly: Bool
   init(_ url: URL, readOnly: Bool = false) throws {
+    self.url = url
+    self.readOnly = readOnly
     databaseName = url.lastPathComponent
     let flags = readOnly ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
     let status = sqlite3_open_v2(url.path, &handle, flags, nil)
@@ -600,7 +721,8 @@ final class MigrationDatabase {
     }
   }
   private func error(_ operation: String, code: Int32) -> MigrationError {
-    let extended = sqlite3_extended_errcode(handle)
+    let connectionCode = sqlite3_extended_errcode(handle)
+    let extended = connectionCode == SQLITE_OK ? code : connectionCode
     let detail = String(cString: sqlite3_errstr(code))
     let hint =
       code & 0xff == SQLITE_BUSY || code & 0xff == SQLITE_LOCKED
@@ -639,8 +761,74 @@ final class MigrationDatabase {
     // Capture diagnostics before backup_finish can replace the connection error.
     let failure = status == SQLITE_DONE ? nil : destination.error("백업 복사", code: status)
     let finish = sqlite3_backup_finish(backup)
-    if let failure { throw failure }
+    if let failure {
+      destination.close()
+      if readOnly, status == SQLITE_CANTOPEN || status & 0xff == SQLITE_READONLY,
+        try snapshotIsolatedWAL(to: url)
+      {
+        return
+      }
+      throw failure
+    }
     guard finish == SQLITE_OK else { throw destination.error("백업 완료", code: finish) }
+    // The backup API copies the source's WAL header, but not its sidecars. Normalize
+    // only this private snapshot before it is reopened or installed in the target.
+    try destination.execute("PRAGMA journal_mode=DELETE")
+  }
+
+  /// macOS SQLite can return CANTOPEN (with no connection error) when a read-only
+  /// WAL reader cannot create its sidecars. The controller requires stopped writers;
+  /// copy the DB and WAL together, detect changes during copying, and let SQLite
+  /// rebuild SHM in a private directory. Never change the account's journal mode or
+  /// use immutable=1, which could hide committed WAL transactions.
+  private func snapshotIsolatedWAL(to destination: URL) throws -> Bool {
+    let header = try FileHandle(forReadingFrom: url)
+    defer { try? header.close() }
+    guard let bytes = try header.read(upToCount: 20), bytes.count == 20,
+      bytes[18] == 2, bytes[19] == 2
+    else { return false }
+    let fm = FileManager.default
+    let files = [url, URL(fileURLWithPath: url.path + "-wal")]
+    struct Stamp: Equatable {
+      let size: UInt64
+      let inode: UInt64
+      let modified: Date
+    }
+    func stamps() throws -> [Stamp?] {
+      try files.map { file in
+        guard file.standardizedFileURL.path == canonicalPath(file.path) else {
+          throw MigrationError.invalid("심볼릭 링크 데이터베이스는 가져올 수 없습니다.")
+        }
+        guard fm.fileExists(atPath: file.path) else { return nil }
+        let attributes = try fm.attributesOfItem(atPath: file.path)
+        guard let size = attributes[.size] as? UInt64,
+          let inode = attributes[.systemFileNumber] as? UInt64,
+          let modified = attributes[.modificationDate] as? Date
+        else { throw MigrationError.invalid("데이터베이스 파일 상태를 확인할 수 없습니다.") }
+        return Stamp(size: size, inode: inode, modified: modified)
+      }
+    }
+    let before = try stamps()
+    let scratch = destination.deletingLastPathComponent().appendingPathComponent("wal-\(UUID())")
+    try fm.createDirectory(
+      at: scratch, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+    defer { try? fm.removeItem(at: scratch) }
+    for (file, stamp) in zip(files, before) where stamp != nil {
+      let copy = scratch.appendingPathComponent(file.lastPathComponent)
+      try fm.copyItem(at: file, to: copy)
+      try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: copy.path)
+    }
+    guard try stamps() == before else {
+      throw MigrationError.invalid("백업 중 데이터베이스가 변경되었습니다. Codex 앱과 CLI 작업을 종료한 뒤 다시 시도해 주세요.")
+    }
+    for suffix in ["", "-wal", "-shm"] {
+      let file = URL(fileURLWithPath: destination.path + suffix)
+      if fm.fileExists(atPath: file.path) { try fm.removeItem(at: file) }
+    }
+    let copy = try MigrationDatabase(scratch.appendingPathComponent(url.lastPathComponent))
+    defer { copy.close() }
+    try copy.snapshot(to: destination)
+    return true
   }
   @discardableResult
   func merge(_ table: String, predicate: String? = nil, replacements: [String: String] = [:]) throws

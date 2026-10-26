@@ -7,6 +7,7 @@ struct ConversationRollout {
   let file: URL
   let id: String
   let contentHash: Data
+  let historyBaseID: String?
 
   static func read(path: String, expectedID: String? = nil) throws -> Self? {
     let logical = URL(
@@ -20,15 +21,16 @@ struct ConversationRollout {
     let fm = FileManager.default
     let file = fm.fileExists(atPath: logical.path) ? logical : compressed
     guard fm.fileExists(atPath: file.path) else { return nil }
-    let (id, hash) = try inspect(file, expectedID: expectedID)
-    return Self(file: file, id: id, contentHash: hash)
+    let (id, hash, historyBaseID) = try inspect(file, expectedID: expectedID)
+    return Self(file: file, id: id, contentHash: hash, historyBaseID: historyBaseID)
   }
 
   /// Hash the decoded bytes in bounded chunks; never retain every conversation in memory.
-  private static func inspect(_ file: URL, expectedID: String?) throws -> (String, Data) {
+  private static func inspect(_ file: URL, expectedID: String?) throws -> (String, Data, String?) {
     var hash = SHA256()
     var header = Data()
     var id: String?
+    var historyBaseID: String?
     var lastByte: UInt8?
     try chunks(file) { bytes in
       guard !bytes.isEmpty else { return }
@@ -50,6 +52,15 @@ struct ConversationRollout {
             throw MigrationError.invalid("채팅 기록의 ID가 다릅니다: \(file.lastPathComponent)")
           }
           id = recordID
+          if let base = payload["history_base"], !(base is NSNull) {
+            guard let base = base as? [String: Any],
+              let baseID = base["thread_id"] as? String, !baseID.isEmpty,
+              !baseID.contains("/"), !baseID.contains("\\")
+            else {
+              throw MigrationError.invalid("채팅의 이전 기록 참조를 확인할 수 없습니다: \(file.lastPathComponent)")
+            }
+            historyBaseID = baseID
+          }
           header = Data()
         }
       }
@@ -57,7 +68,7 @@ struct ConversationRollout {
     guard let id, lastByte == 10 else {
       throw MigrationError.invalid("채팅 기록이 완전히 저장되지 않았습니다: \(file.lastPathComponent)")
     }
-    return (id, Data(hash.finalize()))
+    return (id, Data(hash.finalize()), historyBaseID)
   }
 
   private static func chunks(_ file: URL, consume: (Data) throws -> Void) throws {
