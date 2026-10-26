@@ -109,6 +109,7 @@ public final class ProfileMigration {
               "project_roots", predicate: "project_id IN (SELECT id FROM imported_projects)")
           }
           if selection.conversations {
+            var rollouts: [String: ConversationRollout] = [:]
             try db.execute("CREATE TEMP TABLE eligible_threads (id TEXT PRIMARY KEY)")
             for row in try db.rows(
               "SELECT id, rollout_path FROM incoming.threads WHERE id NOT IN (SELECT id FROM main.threads)"
@@ -118,12 +119,12 @@ public final class ProfileMigration {
                 skippedIDs.insert(id)
                 continue
               }
-              let file = URL(fileURLWithPath: path)
-              try safe(file)
-              guard fm.fileExists(atPath: file.path) else {
+              guard let rollout = try ConversationRollout.read(path: path, expectedID: id) else {
                 skippedIDs.insert(id)
                 continue
               }
+              _ = try rolloutRelative(rollout.file)
+              rollouts[id] = rollout
               try db.execute("INSERT INTO eligible_threads VALUES (\(literal(id)))")
               newThreadIDs.insert(id)
             }
@@ -152,22 +153,10 @@ public final class ProfileMigration {
             for row in try db.rows(
               "SELECT id, rollout_path FROM threads WHERE id IN (SELECT id FROM imported_threads)")
             {
-              guard let id = row[0], let path = row[1] else { continue }
-              let from = URL(fileURLWithPath: path)
-              let relative = try rolloutRelative(from)
-              let to = home(target, relative)
-              try safe(from)
-              guard fm.fileExists(atPath: from.path) else {
-                throw MigrationError.invalid("일부 대화 원본 파일이 없습니다. 원본 계정에서 기록을 확인해 주세요.")
+              guard let id = row[0], let rollout = rollouts[id] else {
+                throw MigrationError.invalid("가져올 채팅 기록을 확인할 수 없습니다.")
               }
-              // Never replace a divergent rollout belonging to an existing target thread.
-              if fm.fileExists(atPath: to.path) {
-                guard fm.contentsEqual(atPath: from.path, andPath: to.path) else {
-                  throw MigrationError.invalid("같은 경로에 다른 대화 파일이 있습니다. 가져오기를 중단했습니다.")
-                }
-              } else {
-                prepared.append((from, to))
-              }
+              let to = try prepareRollout(rollout, prepared: &prepared)
               try db.execute(
                 "UPDATE threads SET rollout_path = \(literal(to.path)) WHERE id = \(literal(id))")
             }
@@ -231,6 +220,15 @@ public final class ProfileMigration {
           original = nil
         }
         changes.append(Change(destination: to.path, original: original))
+        if original == nil, to.lastPathComponent.hasSuffix(".jsonl.zst") {
+          // Resuming this imported chat may materialize its plain companion before restoration.
+          let plain = to.deletingPathExtension()
+          try safe(plain)
+          guard !fm.fileExists(atPath: plain.path) else {
+            throw MigrationError.invalid("가져오는 중 대화 파일이 변경되었습니다. 다시 시도해 주세요.")
+          }
+          changes.append(Change(destination: plain.path, original: nil))
+        }
         try JSONEncoder().encode(changes).write(
           to: backup.appendingPathComponent("undo.json"), options: .atomic)
         // SQLite staging uses a complete snapshot. Stale WAL sidecars must not be replayed.
@@ -296,7 +294,7 @@ public final class ProfileMigration {
         ? String(entry.destination.dropLast(4)) : entry.destination
       guard !url.pathComponents.contains(".."), !url.pathComponents.contains("."),
         exact.contains(base)
-          || (url.pathExtension == "jsonl"
+          || ((url.pathExtension == "jsonl" || url.lastPathComponent.hasSuffix(".jsonl.zst"))
             && sessionPrefixes.contains(where: { entry.destination.hasPrefix($0) }))
       else { throw MigrationError.invalid("백업의 복원 경로가 올바르지 않습니다.") }
       if let original = entry.original {
@@ -414,6 +412,7 @@ public final class ProfileMigration {
     throws -> Set<String>
   {
     var imported = Set<String>()
+    var visited = Set<String>()
     for folder in ["sessions", "archived_sessions"] {
       let root = home(source, folder)
       guard fm.fileExists(atPath: root.path) else { continue }
@@ -429,41 +428,39 @@ public final class ProfileMigration {
       else { throw MigrationError.invalid("대화 폴더를 읽을 수 없습니다.") }
       for case let url as URL in enumerator {
         try safe(url)
-        guard url.pathExtension == "jsonl",
+        guard url.pathExtension == "jsonl" || url.lastPathComponent.hasSuffix(".jsonl.zst"),
           try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true
         else { continue }
-        let file = try FileHandle(forReadingFrom: url)
-        let firstChunk: Data
-        do {
-          firstChunk = try file.read(upToCount: 1_048_576) ?? Data()
-          try file.close()
-        } catch {
-          try? file.close()
-          throw error
-        }
-        guard let lineEnd = firstChunk.firstIndex(of: 10),
-          let record = try JSONSerialization.jsonObject(with: firstChunk[..<lineEnd])
-            as? [String: Any],
-          record["type"] as? String == "session_meta",
-          let payload = record["payload"] as? [String: Any], let id = payload["id"] as? String
-        else {
-          throw MigrationError.invalid("대화 파일의 첫 기록을 확인할 수 없습니다: \(url.lastPathComponent)")
-        }
-        guard !knownIDs.contains(id), !imported.contains(id) else { continue }
-        let to = home(target, try rolloutRelative(url))
-        if fm.fileExists(atPath: to.path) {
-          try safe(to)
-          guard fm.contentsEqual(atPath: url.path, andPath: to.path) else {
-            throw MigrationError.invalid("같은 경로에 다른 대화 파일이 있습니다.")
-          }
-        } else {
-          prepared.append((url, to))
-          imported.insert(id)
-        }
+        let logicalPath = url.pathExtension == "zst" ? String(url.path.dropLast(4)) : url.path
+        guard visited.insert(logicalPath).inserted else { continue }
+        guard let rollout = try ConversationRollout.read(path: logicalPath) else { continue }
+        guard !knownIDs.contains(rollout.id), !imported.contains(rollout.id) else { continue }
+        let previousCount = prepared.count
+        _ = try prepareRollout(rollout, prepared: &prepared)
+        if prepared.count > previousCount { imported.insert(rollout.id) }
       }
       if let enumerationError { throw enumerationError }
     }
     return imported
+  }
+
+  /// Preserve compressed storage while keeping the logical .jsonl path expected by Codex.
+  private func prepareRollout(_ rollout: ConversationRollout, prepared: inout [(URL, URL)]) throws
+    -> URL
+  {
+    let relative = try rolloutRelative(rollout.file)
+    let logical = home(
+      target, rollout.file.pathExtension == "zst" ? String(relative.dropLast(4)) : relative)
+    if let existing = try ConversationRollout.read(path: logical.path, expectedID: rollout.id) {
+      guard existing.contentHash == rollout.contentHash else {
+        throw MigrationError.invalid("같은 경로에 다른 대화 파일이 있습니다. 가져오기를 중단했습니다.")
+      }
+    } else {
+      let destination =
+        rollout.file.pathExtension == "zst" ? logical.appendingPathExtension("zst") : logical
+      prepared.append((rollout.file, destination))
+    }
+    return logical
   }
 
   private func rolloutRelative(_ url: URL) throws -> String {
@@ -677,6 +674,7 @@ final class MigrationDatabase {
     else {
       throw MigrationError.invalid("가져올 데이터의 무결성 검사에 실패했습니다.")
     }
-    try execute("PRAGMA journal_mode=DELETE")
+    // Only finalize our staged DB; attached source databases must remain read-only.
+    try execute("PRAGMA main.journal_mode=DELETE")
   }
 }

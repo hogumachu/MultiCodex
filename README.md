@@ -27,9 +27,9 @@ Codex 데스크톱 앱의 여러 계정을 나란히 실행하는 macOS 메뉴�
 
 ## 설치
 
-[GitHub Releases](https://github.com/hogumachu/MultiCodex/releases)에서 **MultiCodex-0.3.0-macOS.zip**을 내려받아 압축을 풀고 **MultiCodex.app**을 응용 프로그램 폴더로 옮겨 실행합니다. macOS 15 이상과 호환되는 Codex 데스크톱 앱이 필요하며, Xcode는 필요하지 않습니다.
+[GitHub Releases](https://github.com/hogumachu/MultiCodex/releases)에서 **MultiCodex-0.3.1-macOS.zip**을 내려받아 압축을 풀고 **MultiCodex.app**을 응용 프로그램 폴더로 옮겨 실행합니다. macOS 15 이상과 호환되는 Codex 데스크톱 앱이 필요하며, Xcode는 필요하지 않습니다.
 
-v0.3.0은 **Developer ID 서명과 Apple 공증**을 완료했으며, Apple Silicon과 Intel Mac을 지원합니다.
+v0.3.1은 **Developer ID 서명과 Apple 공증**을 완료했으며, Apple Silicon과 Intel Mac을 지원합니다.
 
 ## 사용
 
@@ -42,6 +42,8 @@ v0.3.0은 **Developer ID 서명과 Apple 공증**을 완료했으며, Apple Sili
 추가한 계정은 제목 옆 휴지통 버튼으로 목록에서 삭제할 수 있습니다. 확인 후 계정 목록과 단축키 설정만 제거하며, 로그인·설정·대화 파일과 실행 중인 Codex 창은 유지됩니다. 기존 Codex 계정은 삭제 대상에서 제외됩니다.
 
 ## 계정 데이터 가져오기
+
+Codex가 압축 보관한 이전 채팅(`.jsonl.zst`)도 가져올 수 있습니다. 가져온 채팅은 대상 계정에서 이어서 진행합니다.
 
 대상 계정의 **가져오기**에서 원본 계정과 필요한 항목을 선택합니다.
 

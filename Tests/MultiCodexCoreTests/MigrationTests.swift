@@ -28,6 +28,21 @@ private struct MigrationFixture {
       source: source, target: target, backupRoot: root.appendingPathComponent("backups")
     ).run(selection: selection)
   }
+  func compressed(_ profile: Profile, _ path: String) throws -> Data {
+    let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+      .appendingPathComponent("Fixtures/compressed-rollout.jsonl.zst")
+    let data = try Data(contentsOf: fixture)
+    try write(profile, path, "")
+    try data.write(to: URL(fileURLWithPath: profile.codexHome + "/" + path))
+    return data
+  }
+  var decodedRollout: String {
+    let header =
+      #"{"timestamp":"2026-10-26T01:00:00Z","type":"session_meta","payload":{"id":"private-A","history_mode":"paginated"}}"#
+    let event =
+      #"{"type":"event_msg","payload":{"type":"user_message","message":"synthetic message"}}"#
+    return header + "\n" + String(repeating: event + "\n", count: 5000)
+  }
   func clean() { try? FileManager.default.removeItem(at: root) }
   func state(_ profile: Profile) throws -> MigrationDatabase {
     try write(profile, "auth.json", "AUTH-\(profile.id)")
@@ -99,6 +114,33 @@ private struct MigrationFixture {
       expectNoDifference(
         try f.read(profile, "keybindings.json"), try f.read(f.source, "keybindings.json"))
     }
+  }
+
+  @Test func importsWithSourceWALReaderWithoutChangingItsJournalMode() throws {
+    let f = MigrationFixture()
+    defer { f.clean() }
+    let source = try f.state(f.source)
+    defer { source.close() }
+    try source.execute("PRAGMA journal_mode=WAL")
+    try f.write(
+      f.source, "sessions/a.jsonl", #"{"type":"session_meta","payload":{"id":"a"}}"# + "\n")
+    try source.execute(
+      "INSERT INTO threads VALUES('a','\(f.source.codexHome)/sessions/a.jsonl',NULL,NULL,NULL,NULL,'Chat','legacy')"
+    )
+    // A passive reader must not prevent imports or require changing the source's WAL mode.
+    let reader = try MigrationDatabase(
+      URL(fileURLWithPath: f.source.codexHome + "/state_5.sqlite"), readOnly: true)
+    defer { reader.close() }
+    try reader.execute("BEGIN")
+    _ = try reader.rows("SELECT id FROM threads")
+    for target in [f.target, f.profile("third")] {
+      let result = try ProfileMigration(
+        source: f.source, target: target, backupRoot: f.root.appendingPathComponent("backups")
+      ).run(selection: .init())
+      expectNoDifference(result.conversations, 1)
+      expectNoDifference(try source.rows("PRAGMA journal_mode"), [["wal"]])
+    }
+    try reader.execute("ROLLBACK")
   }
 
   @Test func snapshotFailureReportsDatabaseAndSQLiteCode() throws {
@@ -463,5 +505,114 @@ private struct MigrationFixture {
       URL(fileURLWithPath: f.source.codexHome + "/state_5.sqlite"), readOnly: true)
     #expect(try original.rows("SELECT id FROM threads WHERE id='missing'") == [["missing"]])
     original.close()
+  }
+}
+
+@Suite struct CompressedMigrationTests {
+  @Test(arguments: ["sessions", "archived_sessions"], [false, true])
+  func importsCompressedChatsIntoBandCAndRestores(folder: String, storedPathHasSuffix: Bool) throws
+  {
+    let f = MigrationFixture()
+    defer { f.clean() }
+    let relative = "\(folder)/a.jsonl"
+    let bytes = try f.compressed(f.source, relative + ".zst")
+    let db = try f.state(f.source)
+    try db.execute(
+      "INSERT INTO projects VALUES('p','Project'); INSERT INTO threads VALUES('private-A','\(f.source.codexHome)/\(relative)\(storedPathHasSuffix ? ".zst" : "")','p',NULL,'user-a','account-a','Compressed chat','paginated')"
+    )
+    db.close()
+    // The rollout is authoritative even when this chat has no cached history rows.
+    try f.history(f.source).close()
+    for target in [f.target, f.profile("third")] {
+      try f.write(target, "auth.json", "AUTH-" + target.id)
+      let migration = ProfileMigration(
+        source: f.source, target: target, backupRoot: f.root.appendingPathComponent("backups"))
+      let result = try migration.run(selection: .init())
+      expectNoDifference(result.conversations, 1)
+      expectNoDifference(result.skippedConversations, 0)
+      let to = URL(fileURLWithPath: target.codexHome + "/" + relative)
+      expectNoDifference(try Data(contentsOf: to.appendingPathExtension("zst")), bytes)
+      #expect(!FileManager.default.fileExists(atPath: to.path))
+      let targetDB = try MigrationDatabase(
+        URL(fileURLWithPath: target.codexHome + "/state_5.sqlite"))
+      expectNoDifference(
+        try targetDB.rows("SELECT rollout_path,project_id,creator_account_id FROM threads"),
+        [[to.path, "p", nil]])
+      targetDB.close()
+      expectNoDifference(try migration.run(selection: .init()).conversations, 0)
+      // Codex expands compressed rollouts when the imported chat is resumed.
+      try Data(f.decodedRollout.utf8).write(to: to)
+      try migration.restoreBackup(result.backup)
+      #expect(!FileManager.default.fileExists(atPath: to.path))
+      #expect(!FileManager.default.fileExists(atPath: to.appendingPathExtension("zst").path))
+      expectNoDifference(try f.read(target, "auth.json"), "AUTH-" + target.id)
+    }
+    expectNoDifference(
+      try Data(contentsOf: URL(fileURLWithPath: f.source.codexHome + "/" + relative + ".zst")),
+      bytes)
+  }
+
+  @Test(arguments: [false, true])
+  func importsUnindexedCompressedChatsAndPrefersResumedPlainFile(hasPlain: Bool) throws {
+    let f = MigrationFixture()
+    defer { f.clean() }
+    let bytes = try f.compressed(f.source, "sessions/a.jsonl.zst")
+    let resumed =
+      f.decodedRollout
+      + #"{"type":"event_msg","payload":{"type":"user_message","message":"continued"}}"# + "\n"
+    if hasPlain { try f.write(f.source, "sessions/a.jsonl", resumed) }
+    let result = try f.migrate()
+    expectNoDifference(result.conversations, 1)
+    expectNoDifference(result.skippedConversations, 0)
+    if hasPlain {
+      expectNoDifference(try f.read(f.target, "sessions/a.jsonl"), resumed)
+      #expect(!FileManager.default.fileExists(atPath: f.target.codexHome + "/sessions/a.jsonl.zst"))
+    } else {
+      expectNoDifference(
+        try Data(contentsOf: URL(fileURLWithPath: f.target.codexHome + "/sessions/a.jsonl.zst")),
+        bytes)
+    }
+  }
+
+  @Test(arguments: [false, true])
+  func rejectsDamagedOrMismatchedCompressedRecordBeforeAnyWrites(wrongID: Bool) throws {
+    let f = MigrationFixture()
+    defer { f.clean() }
+    let bytes = try f.compressed(f.source, "sessions/a.jsonl.zst")
+    let db = try f.state(f.source)
+    try db.execute(
+      "INSERT INTO threads VALUES('\(wrongID ? "different" : "private-A")','\(f.source.codexHome)/sessions/a.jsonl',NULL,NULL,NULL,NULL,'Chat','legacy')"
+    )
+    db.close()
+    if !wrongID {
+      try bytes.dropLast(3).write(
+        to: URL(fileURLWithPath: f.source.codexHome + "/sessions/a.jsonl.zst"))
+    }
+    try f.write(f.source, "keybindings.json", #"[{"command":"newTask","key":null}]"#)
+    try f.write(f.target, "keybindings.json", "[]")
+    #expect(throws: MigrationError.self) { try f.migrate() }
+    expectNoDifference(try f.read(f.target, "keybindings.json"), "[]")
+    #expect(!FileManager.default.fileExists(atPath: f.target.codexHome + "/state_5.sqlite"))
+  }
+
+  @Test(arguments: [false, true])
+  func comparesDecodedContentBeforeReplacingExistingRollout(divergent: Bool) throws {
+    let f = MigrationFixture()
+    defer { f.clean() }
+    _ = try f.compressed(f.source, "sessions/a.jsonl.zst")
+    try f.write(f.target, "sessions/a.jsonl", f.decodedRollout + (divergent ? "{}\n" : ""))
+    let sourceDB = try f.state(f.source)
+    try sourceDB.execute(
+      "INSERT INTO threads VALUES('private-A','\(f.source.codexHome)/sessions/a.jsonl',NULL,NULL,NULL,NULL,'Chat','legacy')"
+    )
+    sourceDB.close()
+    if divergent {
+      #expect(throws: MigrationError.self) { try f.migrate() }
+      expectNoDifference(try f.read(f.target, "sessions/a.jsonl"), f.decodedRollout + "{}\n")
+    } else {
+      expectNoDifference(try f.migrate().conversations, 1)
+      expectNoDifference(try f.read(f.target, "sessions/a.jsonl"), f.decodedRollout)
+    }
+    #expect(!FileManager.default.fileExists(atPath: f.target.codexHome + "/sessions/a.jsonl.zst"))
   }
 }

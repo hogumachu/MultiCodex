@@ -29,6 +29,9 @@
 		F6580C68D21DEA223A3C2112 /* Shortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 498ADA837C3DC4935F1AD479 /* Shortcut.swift */; };
 		AAA111111111111111111111 /* Migration.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA222222222222222222222; };
 		AAA333333333333333333333 /* MigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA444444444444444444444; };
+		EEE111111111111111111111 /* ConversationRollout.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEE222222222222222222222; };
+		EEE333333333333333333333 /* libzstd in Frameworks */ = {isa = PBXBuildFile; productRef = EEE444444444444444444444; };
+		FFF111111111111111111111 /* Zstandard-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = FFF222222222222222222222; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -93,6 +96,8 @@
 		EAA99F4FED3975360C2ACCB8 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		AAA222222222222222222222 /* Migration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Migration.swift; sourceTree = "<group>"; };
 		AAA444444444444444444444 /* MigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationTests.swift; sourceTree = "<group>"; };
+		EEE222222222222222222222 /* ConversationRollout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationRollout.swift; sourceTree = "<group>"; };
+		FFF222222222222222222222 /* Zstandard-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Zstandard-LICENSE.txt"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -114,6 +119,12 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		EEE555555555555555555555 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (EEE333333333333333333333 /* libzstd in Frameworks */,);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -133,6 +144,7 @@
 				EAA99F4FED3975360C2ACCB8 /* AppDelegate.swift */,
 				6736CBE12DE57B2DB52CD898 /* Main.swift */,
 				7AD0B45A55242FD5B52A1F72 /* ProcessReader.swift */,
+				FFF222222222222222222222 /* Zstandard-LICENSE.txt */,
 				8326C8FF9D6FDA9D312A7B8A /* ProfileWindow.swift */,
 				61ABD11FD8301FA814AFA3D1 /* ShortcutController.swift */,
 			);
@@ -185,6 +197,7 @@
 				8B84355AD6177563EFED80CE /* AuthSummary.swift */,
 				B30535049B37D07B54D66DCD /* ProfileStore.swift */,
 				AAA222222222222222222222 /* Migration.swift */,
+				EEE222222222222222222222 /* ConversationRollout.swift */,
 				498ADA837C3DC4935F1AD479 /* Shortcut.swift */,
 			);
 			path = MultiCodexCore;
@@ -198,6 +211,7 @@
 			buildConfigurationList = 99128FD6677CB63559542741 /* Build configuration list for PBXNativeTarget "MultiCodexCore" */;
 			buildPhases = (
 				CFF1323203C9C582757145FF /* Sources */,
+				EEE555555555555555555555 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -205,6 +219,7 @@
 			);
 			name = MultiCodexCore;
 			packageProductDependencies = (
+				EEE444444444444444444444 /* libzstd */,
 			);
 			productName = MultiCodexCore;
 			productReference = 842D86BD71FE9B439D52E259 /* MultiCodexCore.framework */;
@@ -287,6 +302,7 @@
 			mainGroup = 76C20C6B1CAFD2ADF54D7719;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				EEE666666666666666666666 /* XCRemoteSwiftPackageReference "zstd" */,
 				4BC60089F9B8BE12068536B9 /* XCRemoteSwiftPackageReference "swift-brian-ui" */,
 				394691C10C8F536E8DD1C898 /* XCRemoteSwiftPackageReference "swift-custom-dump" */,
 			);
@@ -307,6 +323,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A12968B756C14AE18D97E1F2 /* Assets.xcassets in Resources */,
+				FFF111111111111111111111 /* Zstandard-LICENSE.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -345,6 +362,7 @@
 				8614B7E909ED65A0F65F1600 /* AuthSummary.swift in Sources */,
 				062A9CBB3A0485FA9DB62FE0 /* ProfileStore.swift in Sources */,
 				AAA111111111111111111111 /* Migration.swift in Sources */,
+				EEE111111111111111111111 /* ConversationRollout.swift in Sources */,
 				F6580C68D21DEA223A3C2112 /* Shortcut.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -446,12 +464,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = MultiCodex;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHighResolutionCapable = YES;
-				MARKETING_VERSION = 0.3.0;
+				MARKETING_VERSION = 0.3.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -557,13 +575,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = MultiCodex;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHighResolutionCapable = YES;
-				MARKETING_VERSION = 0.3.0;
+				MARKETING_VERSION = 0.3.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -671,6 +689,11 @@
 				kind = branch;
 			};
 		};
+		EEE666666666666666666666 /* XCRemoteSwiftPackageReference "zstd" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/facebook/zstd.git";
+			requirement = {kind = exactVersion; version = 1.5.7; };
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -683,6 +706,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4BC60089F9B8BE12068536B9 /* XCRemoteSwiftPackageReference "swift-brian-ui" */;
 			productName = BrianUI;
+		};
+		EEE444444444444444444444 /* libzstd */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EEE666666666666666666666 /* XCRemoteSwiftPackageReference "zstd" */;
+			productName = libzstd;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
