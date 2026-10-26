@@ -33,7 +33,7 @@ final class ShortcutController {
   func synchronize(profiles: [Profile]) {
     profileIDs = profiles.map(\.id)
     guard let store, let hotKeys, loadError == nil else { return }
-    do { try store.addMissingProfiles(profileIDs) } catch {
+    do { try store.synchronizeProfiles(profileIDs) } catch {
       loadError = error.localizedDescription
       hotKeys.removeAll()
       activeIDs = []
@@ -42,7 +42,12 @@ final class ShortcutController {
     values = Dictionary(
       uniqueKeysWithValues: profileIDs.compactMap { id in store.shortcut(for: id).map { (id, $0) } }
     )
-    if recordingID == nil { registerAll() }
+    errors = errors.filter { profileIDs.contains($0.key) }
+    if let recordingID, !profileIDs.contains(recordingID) {
+      cancelRecording()
+    } else if recordingID == nil {
+      registerAll()
+    }
   }
 
   func beginRecording(for id: String) {

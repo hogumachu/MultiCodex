@@ -39,7 +39,8 @@ public struct Profile: Codable, Identifiable, Equatable, Sendable {
 }
 
 public enum MultiCodexError: LocalizedError {
-  case invalidName, duplicateName, invalidRegistry, profileMissing
+  case invalidName, duplicateName, invalidRegistry, profileMissing, originalProtected,
+    accountOpening
   case unsafePath, appNotFound, unsupportedApp, ambiguousInstance, activationFailed, launchMismatch
 
   public var errorDescription: String? {
@@ -47,6 +48,8 @@ public enum MultiCodexError: LocalizedError {
     case .invalidName: "계정 이름은 1~40자로 입력해 주세요."
     case .duplicateName: "같은 이름의 계정이 이미 있습니다."
     case .invalidRegistry: "프로필 목록을 읽을 수 없습니다. 기존 목록을 덮어쓰지 않았습니다."
+    case .originalProtected: "기존 Codex 계정은 목록에서 삭제할 수 없습니다."
+    case .accountOpening: "계정을 여는 중입니다. 잠시 후 다시 시도해 주세요."
     case .profileMissing: "프로필을 찾을 수 없습니다."
     case .unsafePath: "프로필 저장 경로가 예상 위치와 다릅니다. 실행을 중단했습니다."
     case .appNotFound: "설치된 Codex 또는 ChatGPT 앱을 찾을 수 없습니다."

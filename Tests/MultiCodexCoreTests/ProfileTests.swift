@@ -74,7 +74,7 @@ private struct Fixture {
     let authBefore = try Data(contentsOf: authURL)
     let chatBefore = try Data(contentsOf: chatURL)
     let shortcuts = try ShortcutStore(root: fixture.storeRoot)
-    try shortcuts.addMissingProfiles(store.profiles.map(\.id))
+    try shortcuts.synchronizeProfiles(store.profiles.map(\.id))
     let shortcutsURL = fixture.storeRoot.appendingPathComponent("shortcuts.json")
     let shortcutsBefore = try Data(contentsOf: shortcutsURL)
 
@@ -118,6 +118,70 @@ private struct Fixture {
     #expect(store.profiles.first { $0.id == first.id }?.name == "work")
     #expect(throws: (any Error).self) { try store.rename(id: second.id, name: " WORK ") }
     #expect(try fixture.store().profiles.first { $0.id == second.id }?.name == "Personal")
+  }
+
+  @Test func removingRegistrationPersistsAndKeepsAccountFilesUntouched() throws {
+    let fixture = Fixture()
+    defer { fixture.clean() }
+    let store = try fixture.store()
+    let removed = try store.add(name: "Work")
+    let retained = try store.add(name: "Personal")
+    for profile in store.profiles { try fixture.savedLogin(profile, account: profile.id) }
+    let chat = try fixture.chat(removed, name: "saved-chat")
+    let preferences = URL(fileURLWithPath: removed.userData).appendingPathComponent(
+      "preferences.json")
+    let database = URL(fileURLWithPath: try #require(removed.sqliteHome)).appendingPathComponent(
+      "state.sqlite")
+    try Data("synthetic preferences".utf8).write(to: preferences)
+    try Data("synthetic database bytes".utf8).write(to: database)
+    let files =
+      store.profiles.map { URL(fileURLWithPath: $0.codexHome).appendingPathComponent("auth.json") }
+      + [
+        chat, preferences, database,
+        URL(fileURLWithPath: removed.codexHome).appendingPathComponent("config.toml"),
+      ]
+    let contents = try files.map { try Data(contentsOf: $0) }
+
+    try store.removeRegistration(id: removed.id)
+
+    expectNoDifference(store.profiles, [fixture.original, retained])
+    expectNoDifference(try fixture.store().profiles, store.profiles)
+    expectNoDifference(try files.map { try Data(contentsOf: $0) }, contents)
+    let replacement = try store.add(name: "Work")
+    #expect(replacement.id != removed.id)
+    #expect(replacement.codexHome != removed.codexHome)
+    #expect(throws: (any Error).self) {
+      try store.add(name: "Reused", id: try #require(UUID(uuidString: removed.id)))
+    }
+  }
+
+  @Test func originalAndUnknownProfilesCannotBeRemoved() throws {
+    let fixture = Fixture()
+    defer { fixture.clean() }
+    let store = try fixture.store()
+    _ = try store.add(name: "Work")
+    let before = store.profiles
+    let registry = fixture.storeRoot.appendingPathComponent("profiles.json")
+    let data = try Data(contentsOf: registry)
+    for id in [fixture.original.id, "missing"] {
+      #expect(throws: (any Error).self) { try store.removeRegistration(id: id) }
+      expectNoDifference(store.profiles, before)
+      expectNoDifference(try Data(contentsOf: registry), data)
+    }
+  }
+
+  @Test func failedRemovalWriteKeepsRegistrationInMemory() throws {
+    let fixture = Fixture()
+    defer { fixture.clean() }
+    let store = try fixture.store()
+    let profile = try store.add(name: "Work")
+    let before = store.profiles
+    let registry = fixture.storeRoot.appendingPathComponent("profiles.json")
+    try FileManager.default.removeItem(at: registry)
+    try FileManager.default.createDirectory(at: registry, withIntermediateDirectories: false)
+    #expect(throws: (any Error).self) { try store.removeRegistration(id: profile.id) }
+    expectNoDifference(store.profiles, before)
+    #expect(FileManager.default.fileExists(atPath: profile.codexHome))
   }
 
   @Test func corruptRegistryIsNeverReplaced() throws {

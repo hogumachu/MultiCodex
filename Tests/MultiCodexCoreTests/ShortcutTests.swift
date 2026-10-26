@@ -16,14 +16,14 @@ import Testing
     let root = try directory()
     defer { try? FileManager.default.removeItem(at: root) }
     let store = try ShortcutStore(root: root)
-    try store.addMissingProfiles(["a", "b"])
+    try store.synchronizeProfiles(["a", "b"])
     expectNoDifference(store.shortcut(for: "a")?.display, "⌃⌥⌘1")
     expectNoDifference(store.shortcut(for: "b")?.display, "⌃⌥⌘2")
     let custom = AccountShortcut(keyCode: 40, modifiers: [.control, .shift, .command])
     try store.set(custom, for: "a")
     try store.set(nil, for: "b")
     let reopened = try ShortcutStore(root: root)
-    try reopened.addMissingProfiles(["b", "a", "c"])
+    try reopened.synchronizeProfiles(["b", "a", "c"])
     expectNoDifference(reopened.shortcut(for: "a"), custom)
     expectNoDifference(reopened.shortcut(for: "b"), nil)
     expectNoDifference(reopened.shortcut(for: "c")?.display, "⌃⌥⌘3")
@@ -36,7 +36,7 @@ import Testing
     let root = try directory()
     defer { try? FileManager.default.removeItem(at: root) }
     let store = try ShortcutStore(root: root)
-    try store.addMissingProfiles(["a", "b"])
+    try store.synchronizeProfiles(["a", "b"])
     let before = try Data(contentsOf: root.appendingPathComponent("shortcuts.json"))
     #expect(throws: (any Error).self) { try store.set(store.shortcut(for: "a"), for: "b") }
     #expect(throws: (any Error).self) {
@@ -53,7 +53,7 @@ import Testing
     let root = try directory()
     defer { try? FileManager.default.removeItem(at: root) }
     let store = try ShortcutStore(root: root)
-    try store.addMissingProfiles(["a"])
+    try store.synchronizeProfiles(["a"])
     let shortcut = AccountShortcut(keyCode: 18, modifiers: modifiers)
     try store.set(shortcut, for: "a")
     let reopened = try ShortcutStore(root: root)
@@ -64,12 +64,36 @@ import Testing
     let root = try directory()
     defer { try? FileManager.default.removeItem(at: root) }
     let store = try ShortcutStore(root: root)
-    try store.addMissingProfiles(["a"])
+    try store.synchronizeProfiles(["a"])
     try store.set(AccountShortcut.defaultShortcut(at: 1), for: "a")
-    try store.addMissingProfiles(["a", "b"])
+    try store.synchronizeProfiles(["a", "b"])
     expectNoDifference(store.shortcut(for: "a")?.display, "⌃⌥⌘2")
     expectNoDifference(store.shortcut(for: "b"), nil)
     expectNoDifference(AccountShortcut.defaultShortcut(at: 9), nil)
+  }
+
+  @Test func synchronizingRemovesStaleAccountsAndReleasesTheirShortcuts() throws {
+    let root = try directory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = try ShortcutStore(root: root)
+    try store.synchronizeProfiles(["a", "b", "c"])
+    let custom = AccountShortcut(keyCode: 40, modifiers: [.command])
+    try store.set(custom, for: "a")
+    try store.set(nil, for: "c")
+    let released = try #require(store.shortcut(for: "b"))
+
+    try store.synchronizeProfiles(["a", "c", "d"])
+
+    let reopened = try ShortcutStore(root: root)
+    expectNoDifference(reopened.shortcut(for: "a"), custom)
+    expectNoDifference(reopened.shortcut(for: "b"), nil)
+    expectNoDifference(reopened.shortcut(for: "c"), nil)
+    try reopened.set(released, for: "d")
+    expectNoDifference(try ShortcutStore(root: root).shortcut(for: "d"), released)
+    let data = try Data(contentsOf: root.appendingPathComponent("shortcuts.json"))
+    let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let profiles = try #require(json["profiles"] as? [String: Any])
+    expectNoDifference(Set(profiles.keys), ["a", "c", "d"])
   }
 
   @Test func corruptShortcutsFileIsNeverReplaced() throws {

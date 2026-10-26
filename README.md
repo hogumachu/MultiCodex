@@ -4,7 +4,7 @@ Codex 데스크톱 앱의 여러 계정을 나란히 실행하는 macOS 메뉴�
 
 ## 설치
 
-[GitHub Releases](https://github.com/hogumachu/MultiCodex/releases)에서 **MultiCodex-0.2.1-macOS.zip**을 내려받아 압축을 풀고 **MultiCodex.app**을 응용 프로그램 폴더로 옮겨 실행합니다. macOS 15 이상과 호환되는 Codex 데스크톱 앱이 필요하며, Xcode는 필요하지 않습니다.
+[GitHub Releases](https://github.com/hogumachu/MultiCodex/releases)에서 **MultiCodex-0.2.2-macOS.zip**을 내려받아 압축을 풀고 **MultiCodex.app**을 응용 프로그램 폴더로 옮겨 실행합니다. macOS 15 이상과 호환되는 Codex 데스크톱 앱이 필요하며, Xcode는 필요하지 않습니다.
 
 현재 전달용 빌드는 Developer ID 서명과 Apple 공증을 받지 않은 테스트 배포본입니다. 첫 실행이 차단되면 출처를 신뢰하는 경우에만 **시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기**로 이 앱의 실행을 허용할 수 있습니다. [Apple 안내](https://support.apple.com/ko-kr/102445)를 참고하세요.
 
@@ -17,6 +17,8 @@ Codex 데스크톱 앱의 여러 계정을 나란히 실행하는 macOS 메뉴�
 3. 다음부터 메뉴바, **창으로 이동**, 또는 계정 단축키로 전환합니다.
 
 계정 목록에는 제목과 연결된 이메일이 표시됩니다. 제목 옆 편집 버튼으로 이름을 바꿀 수 있으며 로그인·대화·단축키는 유지됩니다. MultiCodex를 종료해도 실행 중인 Codex 앱은 계속 열려 있습니다.
+
+추가한 계정은 제목 옆 휴지통 버튼으로 목록에서 삭제할 수 있습니다. 확인 후 계정 목록과 단축키 설정만 제거하며, 로그인·설정·대화 파일과 실행 중인 Codex 창은 유지됩니다. 기존 Codex 계정은 삭제 대상에서 제외됩니다.
 
 ## 단축키
 

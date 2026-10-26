@@ -80,6 +80,14 @@ final class AppController {
     refresh()
   }
 
+  func removeProfile(_ profile: Profile) throws {
+    guard !busy else { throw MultiCodexError.accountOpening }
+    try store.removeRegistration(id: profile.id)
+    if selectedID == profile.id { selectedID = nil }
+    message = "\(profile.name) 계정을 목록에서 삭제했습니다. 로그인과 대화 파일은 저장 폴더에 보관했습니다."
+    refresh()
+  }
+
   func openProfile(_ profile: Profile) async {
     guard !busy else { return }
     busy = true

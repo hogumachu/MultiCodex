@@ -52,6 +52,7 @@ private struct AccountsView: View {
   @State private var page = Page.accounts
   @State private var showsAddAccount = false
   @State private var editingProfile: Profile?
+  @State private var removingProfile: Profile?
 
   var body: some View {
     HStack(spacing: 0) {
@@ -91,6 +92,9 @@ private struct AccountsView: View {
     .sheet(isPresented: $showsAddAccount) { ProfileNameView(controller: controller) }
     .sheet(item: $editingProfile) { profile in
       ProfileNameView(controller: controller, profile: profile)
+    }
+    .sheet(item: $removingProfile) { profile in
+      RemoveAccountView(controller: controller, profile: profile)
     }
     .onChange(of: page) { _, _ in shortcuts.cancelRecording() }
     .onDisappear { shortcuts.cancelRecording() }
@@ -182,6 +186,14 @@ private struct AccountsView: View {
               .disabled(controller.busy)
               .accessibilityLabel("\(profile.name) 이름 편집")
               .help("계정 이름 편집")
+            if profile.kind == .managed {
+              Button("목록에서 삭제", systemImage: "trash") { removingProfile = profile }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.weak).buttonTone(.neutral).buttonSize(.xsmall)
+                .disabled(controller.busy)
+                .accessibilityLabel("\(profile.name) 목록에서 삭제")
+                .help("계정 목록에서 삭제")
+            }
           }
           Text(controller.loginLabels[profile.id] ?? "최초 로그인 필요")
             .typography(theme.typography.body.small)
@@ -388,6 +400,55 @@ private struct ProfileNameView: View {
       } else {
         _ = try controller.addProfile(name: name)
       }
+      dismiss()
+    } catch { self.error = error.localizedDescription }
+  }
+}
+
+private struct RemoveAccountView: View {
+  @Environment(\.theme) private var theme
+  @Environment(\.dismiss) private var dismiss
+  let controller: AppController
+  let profile: Profile
+  @State private var error: String?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: theme.spacing.large) {
+      Text("계정을 목록에서 삭제할까요?")
+        .typography(theme.typography.title.medium)
+      Text(profile.name)
+        .typography(theme.typography.label.large)
+        .fixedSize(horizontal: false, vertical: true)
+      Text("로그인·설정·대화 파일은 저장 폴더에 보관됩니다. 이 계정의 단축키는 해제됩니다.")
+        .typography(theme.typography.body.medium)
+        .foregroundStyle(theme.color.foreground.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+      if controller.runningIDs.contains(profile.id) {
+        Text("열려 있는 Codex 창과 작업은 계속됩니다.")
+          .typography(theme.typography.body.small)
+          .foregroundStyle(theme.color.foreground.secondary)
+      }
+      if let error {
+        BrianCallout(error, systemImage: "exclamationmark.triangle").calloutTone(.critical)
+      }
+      HStack {
+        Spacer()
+        Button("취소") { dismiss() }.buttonStyle(.weak).buttonTone(.neutral)
+        Button("목록에서 삭제", action: removeButtonTapped)
+          .buttonStyle(.solid).buttonTone(.critical)
+          .disabled(controller.busy)
+      }
+      .buttonSize(.small)
+    }
+    .padding(theme.spacing.xxLarge)
+    .frame(width: 420)
+    .background(theme.color.background.base)
+    .foregroundStyle(theme.color.foreground.primary)
+  }
+
+  private func removeButtonTapped() {
+    do {
+      try controller.removeProfile(profile)
       dismiss()
     } catch { self.error = error.localizedDescription }
   }

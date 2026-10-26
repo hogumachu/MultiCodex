@@ -84,6 +84,17 @@ public final class ProfileStore {
     profiles = updated
   }
 
+  public func removeRegistration(id: String) throws {
+    guard let profile = profiles.first(where: { $0.id == id }) else {
+      throw MultiCodexError.profileMissing
+    }
+    guard profile.kind == .managed else { throw MultiCodexError.originalProtected }
+    let updated = profiles.filter { $0.id != id }
+    try persist(updated)
+    profiles = updated
+    // Removing a registration never deletes the account's credentials or conversations.
+  }
+
   public func validate(_ profile: Profile) throws {
     guard !profile.name.isEmpty,
       profile.codexHome.hasPrefix("/"), profile.userData.hasPrefix("/"),

@@ -69,7 +69,7 @@ public enum ShortcutError: LocalizedError {
 }
 
 public final class ShortcutStore {
-  private struct Setting: Codable { var shortcut: AccountShortcut? }
+  private struct Setting: Codable, Equatable { var shortcut: AccountShortcut? }
   private struct File: Codable {
     var version = 1
     var profiles: [String: Setting] = [:]
@@ -94,14 +94,16 @@ public final class ShortcutStore {
 
   public func shortcut(for id: String) -> AccountShortcut? { file.profiles[id]?.shortcut }
 
-  public func addMissingProfiles(_ ids: [String]) throws {
+  public func synchronizeProfiles(_ ids: [String]) throws {
     var next = file
+    let activeIDs = Set(ids)
+    next.profiles = next.profiles.filter { activeIDs.contains($0.key) }
     for (index, id) in ids.enumerated() where next.profiles[id] == nil {
       let candidate = AccountShortcut.defaultShortcut(at: index)
       let used = Set(next.profiles.values.compactMap(\.shortcut))
       next.profiles[id] = Setting(shortcut: candidate.flatMap { used.contains($0) ? nil : $0 })
     }
-    if next.profiles.count != file.profiles.count { try persist(next) }
+    if next.profiles != file.profiles { try persist(next) }
   }
 
   public func validate(_ shortcut: AccountShortcut?, for id: String) throws {
