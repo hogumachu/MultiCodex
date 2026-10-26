@@ -1,0 +1,33 @@
+{
+  "originHash" : "df3915dd874914438222fffe9f910d0366ac8dfd5504d6a148a55eb77f98a903",
+  "pins" : [
+    {
+      "identity" : "swift-brian-ui",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/thebriancompany/swift-brian-ui.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "dad15e2a0a03997cd5f32c5b3cd8f5dee3b6c3c6"
+      }
+    },
+    {
+      "identity" : "swift-custom-dump",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/pointfreeco/swift-custom-dump.git",
+      "state" : {
+        "revision" : "4fb9e7cbb4b8f5a7354005db39447f570d6b3e19",
+        "version" : "1.7.3"
+      }
+    },
+    {
+      "identity" : "swift-issue-reporting",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/pointfreeco/swift-issue-reporting",
+      "state" : {
+        "revision" : "b23bb4493c439d3e05152bc167014235ba3d47fc",
+        "version" : "2.1.2"
+      }
+    }
+  ],
+  "version" : 3
+}
