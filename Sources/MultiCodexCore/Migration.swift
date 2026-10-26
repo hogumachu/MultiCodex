@@ -582,12 +582,16 @@ private func identifier(_ value: String) -> String {
 
 final class MigrationDatabase {
   private var handle: OpaquePointer?
+  private let databaseName: String
   init(_ url: URL, readOnly: Bool = false) throws {
+    databaseName = url.lastPathComponent
     let flags = readOnly ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
-    guard sqlite3_open_v2(url.path, &handle, flags, nil) == SQLITE_OK else {
+    let status = sqlite3_open_v2(url.path, &handle, flags, nil)
+    guard status == SQLITE_OK else {
+      let failure = error("열기", code: status)
       sqlite3_close(handle)
       handle = nil
-      throw MigrationError.invalid("Codex 데이터베이스를 열 수 없습니다.")
+      throw failure
     }
     sqlite3_busy_timeout(handle, 2000)
   }
@@ -598,23 +602,30 @@ final class MigrationDatabase {
       self.handle = nil
     }
   }
+  private func error(_ operation: String, code: Int32) -> MigrationError {
+    let extended = sqlite3_extended_errcode(handle)
+    let detail = String(cString: sqlite3_errstr(code))
+    let hint =
+      code & 0xff == SQLITE_BUSY || code & 0xff == SQLITE_LOCKED
+      ? " Codex 앱과 CLI 작업을 종료한 뒤 다시 시도해 주세요." : ""
+    return .invalid(
+      "데이터베이스 \(operation) 실패: \(databaseName) (SQLite 코드: \(code), 확장 코드: \(extended), \(detail)).\(hint)"
+    )
+  }
   func execute(_ sql: String) throws {
-    guard sqlite3_exec(handle, sql, nil, nil, nil) == SQLITE_OK else {
-      throw MigrationError.invalid(
-        "Codex 데이터베이스 형식을 확인할 수 없거나 사용 중입니다: \(String(cString: sqlite3_errmsg(handle)))")
-    }
+    let status = sqlite3_exec(handle, sql, nil, nil, nil)
+    guard status == SQLITE_OK else { throw error("처리", code: status) }
   }
   func rows(_ sql: String) throws -> [[String?]] {
     var statement: OpaquePointer?
-    guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
-      throw MigrationError.invalid("Codex 데이터베이스 형식이 지원되지 않습니다.")
-    }
+    let status = sqlite3_prepare_v2(handle, sql, -1, &statement, nil)
+    guard status == SQLITE_OK else { throw error("조회 준비", code: status) }
     defer { sqlite3_finalize(statement) }
     var result: [[String?]] = []
     while true {
       let status = sqlite3_step(statement)
       if status == SQLITE_DONE { return result }
-      guard status == SQLITE_ROW else { throw MigrationError.invalid("Codex 데이터베이스를 읽지 못했습니다.") }
+      guard status == SQLITE_ROW else { throw error("읽기", code: status) }
       result.append(
         (0..<sqlite3_column_count(statement)).map { column in
           sqlite3_column_text(statement, column).map { String(cString: $0) }
@@ -625,13 +636,14 @@ final class MigrationDatabase {
     let destination = try MigrationDatabase(url)
     defer { destination.close() }
     guard let backup = sqlite3_backup_init(destination.handle, "main", handle, "main") else {
-      throw MigrationError.invalid("데이터베이스 백업을 만들지 못했습니다.")
+      throw destination.error("백업 시작", code: sqlite3_errcode(destination.handle))
     }
     let status = sqlite3_backup_step(backup, -1)
+    // Capture diagnostics before backup_finish can replace the connection error.
+    let failure = status == SQLITE_DONE ? nil : destination.error("백업 복사", code: status)
     let finish = sqlite3_backup_finish(backup)
-    guard status == SQLITE_DONE, finish == SQLITE_OK else {
-      throw MigrationError.invalid("데이터베이스가 사용 중입니다. Codex 작업을 종료해 주세요.")
-    }
+    if let failure { throw failure }
+    guard finish == SQLITE_OK else { throw destination.error("백업 완료", code: finish) }
   }
   @discardableResult
   func merge(_ table: String, predicate: String? = nil, replacements: [String: String] = [:]) throws

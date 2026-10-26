@@ -1,3 +1,4 @@
+import CustomDump
 import Foundation
 import Testing
 
@@ -47,6 +48,97 @@ private struct MigrationFixture {
 }
 
 @Suite struct MigrationTests {
+  @Test(arguments: ["DELETE", "WAL"])
+  func importsSameSourceIntoTwoAccountsInSequence(journalMode: String) throws {
+    let f = MigrationFixture()
+    defer { f.clean() }
+    let targets = [f.target, f.profile("third")]
+    for profile in [f.source] + targets {
+      let db = try f.state(profile)
+      try db.execute("PRAGMA journal_mode=\(journalMode)")
+      let id = profile.id
+      try f.write(
+        profile, "sessions/\(id).jsonl",
+        #"{"type":"session_meta","payload":{"id":"\#(id)"}}"# + "\n")
+      try db.execute(
+        "INSERT INTO projects VALUES('\(id)','\(id)'); INSERT INTO threads VALUES('\(id)','\(profile.codexHome)/sessions/\(id).jsonl','\(id)',NULL,NULL,NULL,'\(id)','paginated')"
+      )
+      db.close()
+      let history = try f.history(profile)
+      try history.execute("PRAGMA journal_mode=\(journalMode)")
+      try history.execute("INSERT INTO thread_items VALUES('\(id)','item','message-\(id)')")
+      history.close()
+    }
+    try f.write(f.source, "keybindings.json", #"[{"command":"newTask","key":"Cmd+K"}]"#)
+    for target in targets {
+      let result = try ProfileMigration(
+        source: f.source, target: target, backupRoot: f.root.appendingPathComponent("backups")
+      ).run(selection: .init())
+      expectNoDifference(result.projects, 1)
+      expectNoDifference(result.conversations, 1)
+    }
+    // Verify B again after importing C, including its own pre-existing conversation.
+    for profile in [f.source] + targets {
+      let db = try MigrationDatabase(URL(fileURLWithPath: profile.codexHome + "/state_5.sqlite"))
+      defer { db.close() }
+      let ids = profile.id == f.source.id ? [f.source.id] : [f.source.id, profile.id].sorted()
+      expectNoDifference(try db.rows("SELECT id FROM threads ORDER BY id"), ids.map { [$0] })
+      expectNoDifference(try db.rows("SELECT id FROM projects ORDER BY id"), ids.map { [$0] })
+      expectNoDifference(
+        try db.rows("SELECT rollout_path FROM threads WHERE id='source'"),
+        [[profile.codexHome + "/sessions/source.jsonl"]])
+      let history = try MigrationDatabase(
+        URL(fileURLWithPath: profile.codexHome + "/thread_history_1.sqlite"))
+      defer { history.close() }
+      expectNoDifference(
+        try history.rows("SELECT item_json FROM thread_items ORDER BY thread_id"),
+        ids.map { ["message-" + $0] })
+      expectNoDifference(try f.read(profile, "auth.json"), "AUTH-" + profile.id)
+      expectNoDifference(
+        try f.read(profile, "sessions/source.jsonl"), try f.read(f.source, "sessions/source.jsonl"))
+      expectNoDifference(
+        try f.read(profile, "keybindings.json"), try f.read(f.source, "keybindings.json"))
+    }
+  }
+
+  @Test func snapshotFailureReportsDatabaseAndSQLiteCode() throws {
+    let f = MigrationFixture()
+    defer { f.clean() }
+    let locked = try f.state(f.target)
+    defer { locked.close() }
+    let reader = try MigrationDatabase(
+      URL(fileURLWithPath: f.target.codexHome + "/state_5.sqlite"), readOnly: true)
+    defer { reader.close() }
+    try locked.execute("BEGIN EXCLUSIVE")
+    defer { try? locked.execute("ROLLBACK") }
+    do {
+      try reader.snapshot(to: f.root.appendingPathComponent("state_5.sqlite"))
+      Issue.record("An exclusive lock must prevent the snapshot")
+    } catch {
+      let message = error.localizedDescription
+      #expect(message.contains("state_5.sqlite"))
+      #expect(message.contains("SQLite 코드: 5"))
+      #expect(message.contains("확장 코드:"))
+      #expect(message.contains("백업 복사"))
+    }
+  }
+
+  @Test func nonLockFailureDoesNotClaimDatabaseIsBusy() throws {
+    let f = MigrationFixture()
+    defer { f.clean() }
+    let db = try f.state(f.source)
+    defer { db.close() }
+    do {
+      try db.execute("SELECT * FROM missing_table")
+      Issue.record("Missing table must fail")
+    } catch {
+      let message = error.localizedDescription
+      #expect(message.contains("state_5.sqlite"))
+      #expect(message.contains("SQLite 코드: 1"))
+      #expect(!message.contains("작업을 종료"))
+    }
+  }
+
   @Test func importsProjectsRolloutsAndPaginatedHistoryWithoutCredentials() throws {
     let f = MigrationFixture()
     defer { f.clean() }
