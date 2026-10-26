@@ -20,9 +20,13 @@ final class ProfileWindow: NSWindowController, NSWindowDelegate {
     window.isReleasedWhenClosed = false
     super.init(window: window)
     window.delegate = self
-    window.contentView = NSHostingView(
+    let contentView = NSHostingView(
       rootView: AccountsView(controller: controller, shortcuts: shortcuts)
         .environment(\.theme, BrianTheme()))
+    // AppKit owns this resizable window's size. SwiftUI's ideal/minimum measurements
+    // can grow dramatically when a wrapping status message changes under a sheet.
+    contentView.sizingOptions = []
+    window.contentView = contentView
     window.center()
   }
 
@@ -53,6 +57,7 @@ private struct AccountsView: View {
   @State private var showsAddAccount = false
   @State private var editingProfile: Profile?
   @State private var removingProfile: Profile?
+  @State private var migrationTarget: Profile?
 
   var body: some View {
     HStack(spacing: 0) {
@@ -95,6 +100,9 @@ private struct AccountsView: View {
     }
     .sheet(item: $removingProfile) { profile in
       RemoveAccountView(controller: controller, profile: profile)
+    }
+    .sheet(item: $migrationTarget) { profile in
+      MigrationView(controller: controller, target: profile)
     }
     .onChange(of: page) { _, _ in shortcuts.cancelRecording() }
     .onDisappear { shortcuts.cancelRecording() }
@@ -224,6 +232,10 @@ private struct AccountsView: View {
             theme.color.foreground.tertiary)
         }
         Spacer()
+        Button("가져오기", systemImage: "square.and.arrow.down") { migrationTarget = profile }
+          .buttonStyle(.weak).buttonTone(.neutral).buttonSize(.small)
+          .disabled(controller.busy || controller.profiles.count < 2)
+          .accessibilityLabel("\(profile.name)에 다른 계정 데이터 가져오기")
         Button {
           Task { await controller.openProfile(profile) }
         } label: {
@@ -249,7 +261,9 @@ private struct AccountsView: View {
         Text(controller.message)
           .typography(theme.typography.body.small)
           .foregroundStyle(theme.color.foreground.secondary)
-          .fixedSize(horizontal: false, vertical: true)
+          .lineLimit(2)
+          .truncationMode(.tail)
+          .help(controller.message)
           .accessibilityIdentifier("account-status")
       }
       HStack {
@@ -452,4 +466,207 @@ private struct RemoveAccountView: View {
       dismiss()
     } catch { self.error = error.localizedDescription }
   }
+}
+
+private struct MigrationView: View {
+  @Environment(\.theme) private var theme
+  @Environment(\.dismiss) private var dismiss
+  let controller: AppController
+  let target: Profile
+  @State private var sourceID = ""
+  @State private var sourceMenu: String?
+  @State private var selection = MigrationSelection()
+  @State private var error: String?
+  @State private var result: MigrationResult?
+  @State private var restoreURL: URL?
+  @State private var restored = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: theme.spacing.xLarge) {
+      VStack(alignment: .leading, spacing: theme.spacing.small) {
+        Text("다른 계정에서 가져오기").typography(theme.typography.title.medium)
+        Text("필요한 설정과 작업을 선택해 이어서 사용하세요.")
+          .typography(theme.typography.body.medium)
+          .foregroundStyle(theme.color.foreground.secondary)
+      }
+      HStack(spacing: theme.spacing.small) {
+        BrianBadge(title: "대상 계정", systemImage: "arrow.down.to.line").badgeTone(.brand)
+        Text(target.name).typography(theme.typography.label.large).lineLimit(1).help(target.name)
+      }
+      if restored {
+        BrianCallout(
+          "계정을 열어 복원된 내용을 확인하세요.", title: "가져오기 전 상태로 복원했습니다", systemImage: "checkmark.circle"
+        )
+        .calloutTone(.positive)
+        HStack {
+          Spacer()
+          Button("닫기") { dismiss() }.buttonStyle(.solid).buttonTone(.brand)
+        }
+      } else if let result {
+        BrianCallout(
+          "프로젝트 \(result.projects)개 · 대화 \(result.conversations)개를 새로 등록했습니다. 기존 대화는 유지됩니다.",
+          title: "가져오기를 완료했습니다", systemImage: "checkmark.circle"
+        ).calloutTone(.positive)
+        if result.skippedConversations > 0 {
+          BrianCallout(
+            "원본 파일이 없는 대화 \(result.skippedConversations)개는 제외했습니다. 파일이 있는 대화만 가져왔으며 원본 계정은 변경하지 않았습니다.",
+            title: "일부 대화 제외", systemImage: "exclamationmark.triangle"
+          ).calloutTone(.warning)
+        }
+        HStack {
+          Button("백업 폴더 열기", systemImage: "folder") { NSWorkspace.shared.open(result.backup) }
+          Spacer()
+          Button("가져오기 되돌리기", systemImage: "arrow.uturn.backward") { restoreURL = result.backup }
+        }
+        .buttonStyle(.weak).buttonTone(.neutral).disabled(controller.busy)
+        errorCallout
+        HStack {
+          if controller.busy { ProgressView().controlSize(.small) }
+          Spacer()
+          Button("닫기") { dismiss() }.buttonStyle(.weak).buttonTone(.neutral)
+            .disabled(controller.busy)
+          Button("계정 열기") {
+            dismiss()
+            Task { await controller.openProfile(target) }
+          }
+          .buttonStyle(.solid).buttonTone(.brand).disabled(controller.busy)
+        }
+      } else {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+          Text("원본 계정").typography(theme.typography.label.medium)
+          Button {
+            sourceMenu = "source"
+          } label: {
+            HStack {
+              Text(controller.profiles.first(where: { $0.id == sourceID })?.name ?? "계정을 선택하세요")
+                .lineLimit(1)
+              Spacer()
+              Image(systemName: "chevron.up.chevron.down")
+            }
+            .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(.outline).buttonTone(.neutral)
+          .menuAnchor(id: "source")
+          .accessibilityLabel("원본 계정 선택")
+          .disabled(controller.busy)
+        }
+        VStack(alignment: .leading, spacing: theme.spacing.large) {
+          Text("가져올 항목").typography(theme.typography.label.medium)
+          migrationOption("Codex 내부 단축키", description: "원본 설정으로 교체합니다.", isOn: $selection.shortcuts)
+          migrationOption(
+            "등록한 로컬 프로젝트", description: "대상에 없는 프로젝트를 추가합니다.", isOn: $selection.projects)
+          migrationOption(
+            "로컬 작업과 대화", description: "원본 파일이 있는 대화만 가져오며, 기존 대화는 유지합니다.",
+            isOn: $selection.conversations)
+        }
+        .padding(theme.spacing.large)
+        .background(theme.color.background.elevated, in: .rect(cornerRadius: theme.radius.large))
+        .overlay(
+          RoundedRectangle(cornerRadius: theme.radius.large).strokeBorder(theme.color.border.subtle)
+        )
+        .disabled(controller.busy)
+        BrianCallout(
+          "원본·대상 Codex 앱과 CLI 작업을 모두 종료해 주세요. 로그인은 유지하고, 변경 전 데이터는 자동 백업합니다.",
+          title: "가져오기 전 확인", systemImage: "info.circle"
+        ).calloutTone(.informative)
+        Text("프로젝트와 워크트리는 이 Mac의 기존 폴더를 사용합니다. 클라우드 작업과 서비스 연결은 포함하지 않습니다.")
+          .typography(theme.typography.body.small)
+          .foregroundStyle(theme.color.foreground.tertiary)
+          .fixedSize(horizontal: false, vertical: true)
+        errorCallout
+        HStack(spacing: theme.spacing.small) {
+          Button("백업에서 복원…", systemImage: "arrow.counterclockwise") { chooseBackup() }
+            .buttonStyle(.weak).buttonTone(.neutral).disabled(controller.busy)
+          Spacer()
+          if controller.busy { ProgressView().controlSize(.small).accessibilityLabel("가져오는 중") }
+          Button("취소") { dismiss() }.buttonStyle(.weak).buttonTone(.neutral).disabled(
+            controller.busy)
+          Button(controller.busy ? "가져오는 중…" : "가져오기") { importData() }
+            .buttonStyle(.solid).buttonTone(.brand)
+            .disabled(controller.busy || sourceID.isEmpty || selection.isEmpty)
+        }
+      }
+    }
+    .buttonSize(.small)
+    .padding(theme.spacing.xxLarge).frame(width: 540)
+    .background(theme.color.background.base)
+    .foregroundStyle(theme.color.foreground.primary)
+    .menuScope(selection: $sourceMenu) { _ in
+      ScrollView {
+        VStack(spacing: 0) {
+          ForEach(controller.profiles.filter { $0.id != target.id }) { profile in
+            BrianMenuItem(
+              title: profile.name, systemImage: "person.crop.circle",
+              isSelected: sourceID == profile.id
+            ) {
+              sourceID = profile.id
+            }
+          }
+        }
+      }
+      .frame(maxHeight: 220)
+    }
+    .interactiveDismissDisabled(controller.busy)
+    .alert(
+      "가져오기 전 상태로 복원할까요?",
+      isPresented: Binding(get: { restoreURL != nil }, set: { if !$0 { restoreURL = nil } })
+    ) {
+      Button("취소", role: .cancel) { restoreURL = nil }
+      Button("복원", role: .destructive) {
+        guard let backup = restoreURL else { return }
+        restoreURL = nil
+        Task {
+          do {
+            try await controller.restoreMigration(for: target, backup: backup)
+            restored = true
+          } catch { self.error = error.localizedDescription }
+        }
+      }
+    } message: {
+      Text("선택한 백업 이후의 단축키·프로젝트·대화 변경이 사라질 수 있습니다. 대상 Codex 계정과 CLI 작업을 종료해 주세요.")
+    }
+  }
+
+  private var errorCallout: some View {
+    Group {
+      if let error {
+        BrianCallout(error, systemImage: "exclamationmark.triangle")
+          .calloutTone(.critical).textSelection(.enabled)
+      }
+    }
+  }
+
+  private func migrationOption(_ title: String, description: String, isOn: Binding<Bool>)
+    -> some View
+  {
+    BrianCheckbox(isOn: isOn) {
+      VStack(alignment: .leading, spacing: theme.spacing.xSmall) {
+        Text(title).typography(theme.typography.label.medium)
+        Text(description).typography(theme.typography.body.small)
+          .foregroundStyle(theme.color.foreground.secondary)
+      }
+    }
+    .accessibilityValue(isOn.wrappedValue ? "선택됨" : "선택 안 됨")
+  }
+
+  private func chooseBackup() {
+    let panel = NSOpenPanel()
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = false
+    panel.allowsMultipleSelection = false
+    panel.directoryURL = controller.store.root.appendingPathComponent("migration-backups")
+    panel.prompt = "백업 선택"
+    if panel.runModal() == .OK { restoreURL = panel.url }
+  }
+
+  private func importData() {
+    guard let source = controller.profiles.first(where: { $0.id == sourceID }) else { return }
+    error = nil
+    Task {
+      do {
+        result = try await controller.migrate(from: source, to: target, selection: selection)
+      } catch { self.error = error.localizedDescription }
+    }
+  }
+
 }

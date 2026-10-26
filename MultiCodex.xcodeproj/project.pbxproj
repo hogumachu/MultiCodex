@@ -27,6 +27,8 @@
 		EDFDD02D55FF0D8E06559AD4 /* BrianUI in Frameworks */ = {isa = PBXBuildFile; productRef = CF9AF41371D9AE42AEFA092A /* BrianUI */; };
 		F444E74D60E9557B61469EF0 /* AppController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB6674021C70E0795A3DE0B /* AppController.swift */; };
 		F6580C68D21DEA223A3C2112 /* Shortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 498ADA837C3DC4935F1AD479 /* Shortcut.swift */; };
+		AAA111111111111111111111 /* Migration.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA222222222222222222222; };
+		AAA333333333333333333333 /* MigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA444444444444444444444; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -89,6 +91,8 @@
 		B89A055285B492E0A5253D92 /* MultiCodexCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MultiCodexCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C55563593F63B6C9F9325AF1 /* ShortcutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutTests.swift; sourceTree = "<group>"; };
 		EAA99F4FED3975360C2ACCB8 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		AAA222222222222222222222 /* Migration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Migration.swift; sourceTree = "<group>"; };
+		AAA444444444444444444444 /* MigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -158,6 +162,7 @@
 			isa = PBXGroup;
 			children = (
 				8FD191551ED6A4554FBD012C /* ProfileTests.swift */,
+				AAA444444444444444444444 /* MigrationTests.swift */,
 				C55563593F63B6C9F9325AF1 /* ShortcutTests.swift */,
 			);
 			path = MultiCodexCoreTests;
@@ -179,6 +184,7 @@
 				39C9B3808C4B11E2A63B4E61 /* Profile.swift */,
 				8B84355AD6177563EFED80CE /* AuthSummary.swift */,
 				B30535049B37D07B54D66DCD /* ProfileStore.swift */,
+				AAA222222222222222222222 /* Migration.swift */,
 				498ADA837C3DC4935F1AD479 /* Shortcut.swift */,
 			);
 			path = MultiCodexCore;
@@ -325,6 +331,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				07F9BC79CE2C70DC9FCD20DB /* ProfileTests.swift in Sources */,
+				AAA333333333333333333333 /* MigrationTests.swift in Sources */,
 				9DED90E49904A1D7D6A259A8 /* ShortcutTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -337,6 +344,7 @@
 				B4C1DF11B43E8EC09B174CF8 /* Profile.swift in Sources */,
 				8614B7E909ED65A0F65F1600 /* AuthSummary.swift in Sources */,
 				062A9CBB3A0485FA9DB62FE0 /* ProfileStore.swift in Sources */,
+				AAA111111111111111111111 /* Migration.swift in Sources */,
 				F6580C68D21DEA223A3C2112 /* Shortcut.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -438,12 +446,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = MultiCodex;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHighResolutionCapable = YES;
-				MARKETING_VERSION = 0.2.3;
+				MARKETING_VERSION = 0.3.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -549,13 +557,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = MultiCodex;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHighResolutionCapable = YES;
-				MARKETING_VERSION = 0.2.3;
+				MARKETING_VERSION = 0.3.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

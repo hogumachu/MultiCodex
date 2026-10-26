@@ -4,9 +4,9 @@ Codex 데스크톱 앱의 여러 계정을 나란히 실행하는 macOS 메뉴�
 
 ## 설치
 
-[GitHub Releases](https://github.com/hogumachu/MultiCodex/releases)에서 **MultiCodex-0.2.3-macOS.zip**을 내려받아 압축을 풀고 **MultiCodex.app**을 응용 프로그램 폴더로 옮겨 실행합니다. macOS 15 이상과 호환되는 Codex 데스크톱 앱이 필요하며, Xcode는 필요하지 않습니다.
+[GitHub Releases](https://github.com/hogumachu/MultiCodex/releases)에서 **MultiCodex-0.3.0-macOS.zip**을 내려받아 압축을 풀고 **MultiCodex.app**을 응용 프로그램 폴더로 옮겨 실행합니다. macOS 15 이상과 호환되는 Codex 데스크톱 앱이 필요하며, Xcode는 필요하지 않습니다.
 
-v0.2.3 배포본은 **Developer ID 서명과 Apple 공증**을 완료했으며, Apple Silicon과 Intel Mac을 지원합니다. 공증 티켓이 앱에 포함되어 있습니다. 첫 실행 시 인터넷에서 내려받은 앱을 열지 묻는 일반 확인 창은 표시될 수 있습니다. [Apple 안내](https://support.apple.com/ko-kr/102445)를 참고하세요.
+v0.3.0 배포본은 **Developer ID 서명과 Apple 공증**을 완료했으며, Apple Silicon과 Intel Mac을 지원합니다. 공증 티켓이 앱에 포함되어 있습니다. 첫 실행 시 인터넷에서 내려받은 앱을 열지 묻는 일반 확인 창은 표시될 수 있습니다. [Apple 안내](https://support.apple.com/ko-kr/102445)를 참고하세요.
 
 각 사용자는 자신의 Mac에서 직접 로그인합니다. 배포 파일에는 개발자의 로그인 정보·계정 목록·대화가 포함되지 않습니다.
 
@@ -75,3 +75,17 @@ Asset type: production macOS application icon for MultiCodex, an app that keeps 
 Create one polished, memorable app icon, square 1024 by 1024 pixels. A centered deep midnight-blue rounded-square tile with generous macOS-style rounded corners, occupying about 88 percent of the canvas, with a completely transparent exterior. The symbol is two overlapping upright application-window cards, slightly offset diagonally, representing two independent accounts. The back card is saturated cobalt blue, the front card is luminous pale blue/near-white with a dark navy interior and one bold, simple terminal chevron and short underscore. Keep the geometry extremely clean and the symbol large, legible at 32 pixels. Subtle soft three-dimensional depth, precise edges, restrained soft highlights, premium native Mac utility aesthetic. Balanced centered composition, front-on orthographic view. Color palette drawn from an existing dark UI with blue accents. No app name, letters, words, tiny interface details, people, avatar circles, official OpenAI logo, watermarks, background scene, mockup device, extra symbols, or multiple variants. Deliver only the finished icon artwork with real alpha transparency around the rounded tile.
 
 </details>
+
+## 계정 데이터 가져오기
+
+대상 계정 카드의 **가져오기**에서 원본 계정과 항목을 선택합니다. 원본·대상 Codex 앱과 해당 계정의 CLI 작업을 모두 종료한 뒤 실행하세요.
+
+- **Codex 내부 단축키**: 원본의 사용자 지정 단축키로 교체합니다. 원본이 기본값을 사용하면 대상도 기본값으로 돌아갑니다. MultiCodex의 계정 전환 단축키는 별개입니다.
+- **로컬 프로젝트**: 등록된 프로젝트와 폴더 경로를 추가합니다. 같은 ID가 있으면 대상 데이터를 유지합니다.
+- **로컬 작업과 대화**: 일반·보관 대화, 프로젝트 연결, 페이지 단위 대화 기록을 가져옵니다. 같은 대화 ID는 대상 데이터를 유지하며, 새 대화의 기록 파일 경로는 대상 계정 폴더로 변경합니다.
+
+원본 데이터와 대상 로그인·인증·설정 파일은 유지합니다. 프로젝트 소스 코드, 워크트리와 대화에서 참조하는 기존 첨부 파일은 같은 Mac의 기존 경로를 계속 사용하므로 원본 폴더를 삭제하지 마세요. 클라우드 작업, 연결 서비스 인증, 메모리와 자동화는 가져오지 않습니다.
+
+변경 전 파일은 `~/Library/Application Support/MultiCodex/migration-backups/<UUID>/`에 저장됩니다. 실패하면 자동으로 원복합니다. 완료 화면의 **가져오기 되돌리기**, 또는 가져오기 화면의 **백업에서 복원…**으로 해당 백업 폴더를 선택해 수동 복원할 수도 있습니다. 복원 시 백업 이후의 대상 데이터 변경이 사라질 수 있습니다. 강제 종료로 중단된 가져오기는 해당 백업을 복원한 후 다시 실행해야 합니다.
+
+Codex 내부 저장 형식에 의존합니다. 두 계정의 DB 버전이 다르면 각 계정을 같은 Codex 버전으로 열고 종료한 후 다시 시도하세요. 원본 대화 파일이 없는 항목은 관련 기록과 함께 제외하고, 완료 화면에 제외 건수를 표시합니다. 지원하지 않는 형식과 심볼릭 링크 경로는 오류를 표시하고 중단합니다. 설치된 Codex 0.164.0-alpha.11.1의 DB 스키마로 검증했으며, 격리된 테스트 데이터로 실제 앱 서버의 프로젝트 조회·대화 목록·대화 읽기·재개를 확인했습니다.

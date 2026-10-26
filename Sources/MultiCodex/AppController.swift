@@ -147,6 +147,69 @@ final class AppController {
     } catch { message = error.localizedDescription }
   }
 
+  func migrate(from source: Profile, to target: Profile, selection: MigrationSelection) async throws
+    -> MigrationResult
+  {
+    guard !busy else { throw MultiCodexError.accountOpening }
+    try store.validate(source)
+    try store.validate(target)
+    let instances = ProcessReader.instances()
+    guard
+      !instances.contains(where: {
+        $0.location == nil || $0.location?.matches(source) == true
+          || $0.location?.matches(target) == true
+      })
+    else {
+      throw MigrationError.invalid("원본과 대상 Codex 계정을 모두 종료한 뒤 다시 시도해 주세요. 창을 닫는 것만으로는 종료되지 않습니다.")
+    }
+    guard try !ProcessReader.hasDataWriter(for: [source, target]) else {
+      throw MigrationError.invalid("원본 또는 대상 계정의 Codex CLI 작업이 실행 중입니다. 작업을 종료한 뒤 다시 시도해 주세요.")
+    }
+    busy = true
+    message = "계정 데이터를 가져오는 중…"
+    defer {
+      busy = false
+      refresh()
+    }
+    let backupRoot = store.root.appendingPathComponent("migration-backups")
+    do {
+      let result = try await Task.detached(priority: .userInitiated) {
+        try ProfileMigration(source: source, target: target, backupRoot: backupRoot).run(
+          selection: selection)
+      }.value
+      message =
+        "\(target.name)에 대화 \(result.conversations)개를 가져왔습니다. 원본 파일 없음으로 \(result.skippedConversations)개 제외."
+      return result
+    } catch {
+      message = error.localizedDescription
+      throw error
+    }
+  }
+
+  func restoreMigration(for target: Profile, backup: URL) async throws {
+    guard !busy else { throw MultiCodexError.accountOpening }
+    try store.validate(target)
+    guard
+      !ProcessReader.instances().contains(where: {
+        $0.location == nil || $0.location?.matches(target) == true
+      }),
+      try !ProcessReader.hasDataWriter(for: [target])
+    else {
+      throw MigrationError.invalid("복원할 Codex 계정과 CLI 작업을 종료해 주세요.")
+    }
+    busy = true
+    defer {
+      busy = false
+      refresh()
+    }
+    let backupRoot = store.root.appendingPathComponent("migration-backups")
+    try await Task.detached(priority: .userInitiated) {
+      try ProfileMigration(source: target, target: target, backupRoot: backupRoot).restoreBackup(
+        backup)
+    }.value
+    message = "\(target.name)의 데이터를 가져오기 전 상태로 복원했습니다."
+  }
+
   func refresh() {
     profiles = store.profiles
     let instances = ProcessReader.instances()
